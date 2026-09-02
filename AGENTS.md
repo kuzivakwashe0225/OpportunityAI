@@ -48,11 +48,11 @@ tested client — `search(query, api_key=..., max_results=...) -> list[SearchRes
 — verified against Tavily's actual documented contract, not guessed.
 
 **Current gap:** the Tavily-backed discovery path and conservative search-result
-extraction now exist, but real scholarship source parsing is still intentionally
-shallow. The next connector should turn permitted public result pages/PDFs into
-structured deadlines, eligibility, requirements, and evidence metadata. The
-owner still needs to set `TAVILY_API_KEY` before live discovery can run; tests
-mock the client.
+extraction now exist. Structured fields are extracted only from explicitly
+verified page/PDF text; Tavily snippets remain evidence-only. The next connector
+should fetch permitted public result pages/PDFs, record retrieval metadata, and
+pass verified content into the parser. The owner still needs to set
+`TAVILY_API_KEY` before live discovery can run; tests mock the client.
 
 ## Lane ownership
 
@@ -70,7 +70,7 @@ it's kept current.
 | Source registry (fixed portals) | `sources.py` | Codex | registry primitive done, not populated yet |
 | Search client | `search.py` | Claude | done — Tavily, tested with mocked HTTP |
 | Discovery (profile → search) | `discovery.py`, `search.py` | Codex/Claude | Tavily-backed profile discovery done; bounded and URL-deduplicated |
-| Extraction (search result → Opportunity draft) | `extraction.py` | Codex | conservative evidence-preserving draft done; structured parser remains |
+| Extraction (search result → Opportunity draft) | `extraction.py` | Codex | conservative parser done; verified-content gate protects hard requirements |
 | Drafting / package builder | not started | open | after extraction exists |
 
 ## Review protocol
