@@ -7,6 +7,8 @@ from .search import SearchResult
 from .discovery import canonicalize_url
 from .connector import PublicPage
 
+PARSER_VERSION = "scholarship-regex-v1"
+
 
 def result_to_opportunity(result: SearchResult, *, verified: bool = False) -> Opportunity:
     """Create a conservative draft; parsing requirements is a separate step."""
@@ -39,6 +41,8 @@ def page_to_opportunity(page: PublicPage, *, title: str) -> Opportunity:
         "retrieved_at": page.retrieved_at,
         "content_sha256": page.sha256,
         "requirements_verified": True,
+        "content_type": page.content_type,
+        "parser_version": PARSER_VERSION,
     })
 
 

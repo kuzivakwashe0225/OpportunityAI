@@ -6,7 +6,7 @@ from opportunity_agent.connector import fetch_public_page
 
 def test_fetch_public_page_returns_content_and_integrity_metadata():
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, text="Scholarship details")
+        return httpx.Response(200, text="Scholarship details", headers={"content-type": "text/html; charset=utf-8"})
 
     page = fetch_public_page(
         "https://example.org/scholarship",
@@ -17,6 +17,7 @@ def test_fetch_public_page_returns_content_and_integrity_metadata():
     assert page.content == "Scholarship details"
     assert page.sha256
     assert page.retrieved_at
+    assert page.content_type == "text/html"
 
 
 def test_fetch_public_page_rejects_non_https_urls():

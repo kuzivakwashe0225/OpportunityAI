@@ -37,6 +37,8 @@ class Opportunity(BaseModel):
     retrieved_at: str | None = None
     content_sha256: str | None = None
     requirements_verified: bool = False
+    content_type: str | None = None
+    parser_version: str | None = None
 
 
 class MatchResult(BaseModel):

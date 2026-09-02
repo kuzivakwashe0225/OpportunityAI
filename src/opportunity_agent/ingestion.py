@@ -35,4 +35,9 @@ def merge_opportunity(first: Opportunity, second: Opportunity) -> Opportunity:
             *second.required_documents,
         ])),
         "interests": list(dict.fromkeys([*first.interests, *second.interests])),
+        "retrieved_at": second.retrieved_at or first.retrieved_at,
+        "content_sha256": second.content_sha256 or first.content_sha256,
+        "requirements_verified": first.requirements_verified or second.requirements_verified,
+        "content_type": second.content_type or first.content_type,
+        "parser_version": second.parser_version or first.parser_version,
     })

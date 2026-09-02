@@ -12,7 +12,7 @@ load_dotenv()
 from .digest import build_digest
 from .discovery import build_search_queries, discover
 from .connector import fetch_public_page
-from .extraction import page_to_opportunity
+from .extraction import PARSER_VERSION, page_to_opportunity
 from .models import Opportunity, PersonalProfile
 from .store import OpportunityStore
 
@@ -79,7 +79,12 @@ def run_discovery() -> dict[str, object]:
             failures.append(f"{result.url}: {error}")
             sources.append({"url": result.url, "status": "failed", "error": str(error)})
             continue
-        sources.append({"url": page.url, "status": "parsed"})
+        sources.append({
+            "url": page.url,
+            "status": "parsed",
+            "content_type": page.content_type,
+            "parser_version": PARSER_VERSION,
+        })
     run = store.record_run(
         queries=queries,
         found=len(results),

@@ -88,3 +88,5 @@ def test_verified_page_preserves_retrieval_metadata():
     assert opportunity.retrieved_at == page.retrieved_at
     assert opportunity.content_sha256 == page.sha256
     assert opportunity.requirements_verified is True
+    assert opportunity.content_type == "text/html"
+    assert opportunity.parser_version

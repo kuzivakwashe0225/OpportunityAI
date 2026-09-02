@@ -77,6 +77,24 @@ def test_missing_evidence_requires_review():
     assert any("evidence" in item.lower() for item in result.unknown_requirements)
 
 
+def test_unverified_record_without_requirements_requires_review():
+    result = match_opportunity(
+        make_opportunity(
+            eligible_countries=[],
+            required_levels=[],
+            required_fields=[],
+            required_documents=[],
+            required_age_max=None,
+            evidence=["search result evidence"],
+            requirements_verified=False,
+        ),
+        make_profile(),
+    )
+
+    assert result.status == "needs_review"
+    assert any("eligibility" in item.lower() for item in result.unknown_requirements)
+
+
 def test_expired_opportunity_is_ineligible():
     result = match_opportunity(
         make_opportunity(deadline=date(2026, 1, 1), evidence=["deadline evidence"]),

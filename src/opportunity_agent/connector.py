@@ -18,6 +18,7 @@ class PublicPage:
     content: str
     retrieved_at: str
     sha256: str
+    content_type: str = "text/html"
 
 
 def fetch_public_page(
@@ -65,6 +66,7 @@ def fetch_public_page(
                 chunks.append(chunk)
             body = b"".join(chunks)
             encoding = response.encoding or "utf-8"
+            content_type = response.headers.get("content-type", "text/html").split(";", 1)[0].strip().lower()
     finally:
         if owns_client:
             http_client.close()
@@ -73,4 +75,5 @@ def fetch_public_page(
         content=body.decode(encoding, errors="replace"),
         retrieved_at=datetime.now(timezone.utc).isoformat(),
         sha256=sha256(body).hexdigest(),
+        content_type=content_type,
     )

@@ -167,6 +167,37 @@ def test_discovery_exposes_run_audit_record(monkeypatch):
     assert runs.json()[0]["sources"] == []
 
 
+def test_discovery_run_records_source_provenance(monkeypatch):
+    client.put("/profile", json=profile_payload())
+    monkeypatch.setattr(
+        "opportunity_agent.api.discover",
+        lambda profile, *, api_key: [SearchResult(
+            title="Award", url="https://example.org/award", content="snippet"
+        )],
+    )
+    monkeypatch.setattr(
+        "opportunity_agent.api.fetch_public_page",
+        lambda url: PublicPage(
+            url=url,
+            content="Open to Zimbabwe applicants.",
+            retrieved_at="now",
+            sha256="hash",
+            content_type="text/html",
+        ),
+    )
+    monkeypatch.setenv("TAVILY_API_KEY", "test-key")
+
+    response = client.post("/discover")
+
+    assert response.status_code == 200
+    assert client.get("/runs").json()[0]["sources"] == [{
+        "url": "https://example.org/award",
+        "status": "parsed",
+        "content_type": "text/html",
+        "parser_version": "scholarship-regex-v1",
+    }]
+
+
 def test_failed_discovery_still_records_run(monkeypatch):
     client.put("/profile", json=profile_payload())
 

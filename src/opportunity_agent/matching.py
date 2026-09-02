@@ -34,13 +34,16 @@ def match_opportunity(
 
     if not opportunity.evidence:
         unknown.append("source evidence is required")
-    if opportunity.requirements_verified and not (
+    has_requirements = (
         opportunity.eligible_countries
         or opportunity.required_levels
         or opportunity.required_fields
         or opportunity.required_age_max is not None
         or opportunity.required_documents
-    ):
+    )
+    if not opportunity.requirements_verified and not has_requirements:
+        unknown.append("eligibility requirements have not been verified")
+    elif opportunity.requirements_verified and not has_requirements:
         unknown.append("verified eligibility requirements were not found")
 
     reference_date = as_of or date.today()
