@@ -67,7 +67,7 @@ it's kept current.
 | Matching engine | `matching.py` | Codex | active |
 | Ingestion / dedup | `ingestion.py` | Codex | merge logic done; real fetching not started |
 | Workflow API + persistence | `api.py`, `store.py` | Codex | done for MVP scope, atomic persistence included |
-| Digest / review workspace | `digest.py` | Claude | done for MVP scope |
+| Digest / review workspace | `digest.py`, `api.py`, `tests/test_ui.py` | Codex/Claude | server-rendered inbox, package review, and feedback UI done |
 | Source registry (fixed portals) | `sources.py` | Codex | registry primitive done, not populated yet |
 | Search client | `search.py` | Claude | done — Tavily, tested with mocked HTTP |
 | Discovery (profile → search) | `discovery.py`, `search.py` | Codex/Claude | Tavily-backed profile discovery done; bounded and URL-deduplicated |
@@ -76,12 +76,8 @@ it's kept current.
 | Test isolation | `tests/conftest.py` | Claude | done — module store singleton was defaulting to real `.data/store.json` in tests, fixed |
 | Review UI | `api.py` (`/ui`, `/ui/opportunities/{id}/feedback`) | Codex | in progress as of this row — server-rendered HTML, no JS, form-based feedback with a 303 redirect. Don't build a competing UI; if extending it, extend this one |
 
-**Not wired yet:** `drafting.build_application_package()` exists and is tested
-but has no API endpoint (e.g. `POST /opportunities/{id}/package`) — not adding
-one myself right now since `api.py` is mid-edit on the discovery/verification
-path. Small, obvious follow-up once that settles: call it with
-`store`'s stored opportunity + a fresh `match_opportunity()` call and return
-the `ApplicationPackage`.
+The drafting package is now available through both a JSON API endpoint and a
+server-rendered review page. Submission remains intentionally absent.
 
 ## Review protocol
 
