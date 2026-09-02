@@ -17,6 +17,8 @@ class PersonalProfile(BaseModel):
     achievements: list[str] = Field(default_factory=list)
     preferred_countries: list[str] = Field(default_factory=list)
     preferred_funding: list[str] = Field(default_factory=list)
+    certificates: list[str] = Field(default_factory=list)
+    work_history: list[str] = Field(default_factory=list)
 
 
 class Opportunity(BaseModel):
