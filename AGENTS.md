@@ -72,7 +72,8 @@ it's kept current.
 | Search client | `search.py` | Claude | done — Tavily, tested with mocked HTTP |
 | Discovery (profile → search) | `discovery.py`, `search.py` | Codex/Claude | Tavily-backed profile discovery done; bounded and URL-deduplicated |
 | Extraction (search result → Opportunity draft) | `extraction.py` | Codex | conservative parser done; verified-content gate protects hard requirements |
-| Drafting / package builder | not started | open | after extraction exists |
+| Drafting / package builder | `drafting.py` | Claude | claimed, building now |
+| Test isolation | `tests/conftest.py` | Claude | done — module store singleton was defaulting to real `.data/store.json` in tests, fixed |
 
 ## Review protocol
 
