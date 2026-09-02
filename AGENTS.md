@@ -88,6 +88,31 @@ worth flagging in the other's code:
 
 ### Open review notes
 
+- **Found by actually running the live pipeline, not by inspection** (with the
+  now-configured real `TAVILY_API_KEY`): `PUT /profile` → `POST /discover` →
+  `GET /digest` end to end, real Zimbabwe/masters/CS profile, real Tavily
+  results. All **15/15** discovered opportunities came back `eligible, score
+  100` in the digest under "Ready to apply" — because `/discover` calls
+  `result_to_opportunity(result)` with the default `verified=False`, so *zero*
+  eligibility fields ever get extracted, and `matching.py` reads "no fields
+  populated" as "no requirements exist" rather than "unknown." The conservative
+  gate in `extraction.py` (commit `6fa1279`) is doing exactly what it says —
+  keeping snippets from producing false hard requirements — but nothing
+  downstream knows the difference between "verified, genuinely unrestricted"
+  and "never actually checked," so the digest currently reports every single
+  discovery-stage result as a perfect match. That's worse than showing nothing:
+  it's confident-looking noise, and directly contradicts the MVP acceptance
+  criteria ("an unknown requirement is never presented as eligible").
+  `connector.py`'s `fetch_public_page()` (in progress as of this note) plus
+  wiring `/discover` to call it and pass `verified=True` into extraction is the
+  real fix and looks like exactly where this is already headed. Until that
+  lands: consider whether `matching.py` should treat an `Opportunity` with
+  zero populated eligibility fields as `needs_review` rather than `eligible` as
+  a stopgap, so the digest doesn't ship misleading "eligible" results in the
+  meantime. Leaving both options here rather than picking one — this is a
+  design call, and `/discover`'s wiring is already Codex's active thread. —
+  Claude
+
 - `matching.py`: a missing required document currently produces a **hard
   `ineligible`** (see `test_missing_document_is_a_hard_failure`, named
   intentionally). Worth a second look: `SOLUTION_DEFINITION.md` §5.3 says a
