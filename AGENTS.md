@@ -74,6 +74,7 @@ it's kept current.
 | Extraction (search result → Opportunity draft) | `extraction.py` | Codex | conservative parser done; verified-content gate protects hard requirements |
 | Drafting / package builder | `drafting.py` | Claude | done — checklist + cover-note draft, no LLM call, nothing unfounded in the output |
 | Test isolation | `tests/conftest.py` | Claude | done — module store singleton was defaulting to real `.data/store.json` in tests, fixed |
+| Review UI | `api.py` (`/ui`, `/ui/opportunities/{id}/feedback`) | Codex | in progress as of this row — server-rendered HTML, no JS, form-based feedback with a 303 redirect. Don't build a competing UI; if extending it, extend this one |
 
 **Not wired yet:** `drafting.build_application_package()` exists and is tested
 but has no API endpoint (e.g. `POST /opportunities/{id}/package`) — not adding
