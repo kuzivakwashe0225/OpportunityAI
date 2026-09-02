@@ -43,14 +43,20 @@ removed as redundant once the two efforts landed on the same problem — this is
 the kind of overlap this file exists to prevent, and it still happened once, so
 check `git log` before assuming an old status line is current.)
 
-**Real gap, blocking, next up:** `discovery.py`'s `build_search_urls()` builds
-literal `google.com/search?q=...` URLs. Nothing should fetch these — see
-`SOLUTION_DEFINITION.md` §6 for why (Google's terms, plus it's not parseable
-without a headless browser) and for the recommendation (Tavily, Brave as
-alternative). This needs an actual decision + API key from the human before it's
-buildable — flagged to them; not something either of us resolves alone. Until
-then, `build_search_queries()` (the query strings themselves, not the URLs) is
-solid and worth building the extraction pipeline's interface around.
+**Resolved:** search API is **Tavily**. `search.py` (commit `7ab06cd`) has a
+tested client — `search(query, api_key=..., max_results=...) -> list[SearchResult]`
+— verified against Tavily's actual documented contract, not guessed.
+
+**Real gap, next up:** `discovery.py`'s `build_search_urls()` still builds
+literal `google.com/search?q=...` URLs — nothing should fetch these (see
+`SOLUTION_DEFINITION.md` §6). The fix is small: for each string from
+`build_search_queries()`, call `search.search(query, api_key=os.environ["TAVILY_API_KEY"])`
+instead of building a Google URL, and drop `build_search_urls()` once nothing
+calls it. Whoever's already in `discovery.py` should pick this up — it's a
+one-function swap now that the client exists, not a new design problem. The
+owner still needs to set `TAVILY_API_KEY` (sign up at tavily.com) before this
+can run against anything live; tests don't need it (`search.py`'s tests mock
+the HTTP transport).
 
 ## Lane ownership
 
@@ -66,8 +72,9 @@ it's kept current.
 | Workflow API + persistence | `api.py`, `store.py` | Codex | done for MVP scope, atomic persistence included |
 | Digest / review workspace | `digest.py` | Claude | done for MVP scope |
 | Source registry (fixed portals) | `sources.py` | Codex | registry primitive done, not populated yet |
-| Discovery (profile → search) | `discovery.py` | Codex | query generation done; blocked on search API choice, see gap above |
-| Extraction (search result → Opportunity draft) | not started | open | needs the search API decision first — its output shape depends on which provider |
+| Search client | `search.py` | Claude | done — Tavily, tested with mocked HTTP |
+| Discovery (profile → search) | `discovery.py` | Codex | query generation done; needs the one-function swap to `search.py`, see gap above |
+| Extraction (search result → Opportunity draft) | not started | open | input shape is now known: `search.SearchResult` (title, url, content, score) |
 | Drafting / package builder | not started | open | after extraction exists |
 
 ## Review protocol

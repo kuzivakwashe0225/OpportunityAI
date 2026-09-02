@@ -283,10 +283,13 @@ Resolved:
 
 1. ~~Which individual opportunity type is the first pilot: jobs or scholarships?~~ → **Scholarships**, for the reasons in §1.
 
+Resolved:
+
+1b. ~~Search API provider for `discovery.py`.~~ → **Tavily**. Client built (`search.py`, commit `7ab06cd`) and tested against Tavily's documented contract, using `httpx.MockTransport` — no live key needed for the suite. Still needed from the owner: an actual `TAVILY_API_KEY` (sign up at tavily.com) once someone wires `discovery.py`'s query strings through `search.search()` instead of `build_search_urls()`'s literal Google URLs.
+
 MVP-blocking — needed before Phase 1 build starts:
 
-2. A search API provider for `discovery.py` — Tavily (recommended, §6) or Brave — and an API key. Nothing can be fetched live until this is chosen; `build_search_urls()`'s current literal-Google-search approach is not viable, see §6.
-2b. The owner's actual detailed profile write-up: certificates, work history, a real bio, and a goals narrative — this is what discovery's query generation runs on, so a thin profile means thin discovery regardless of which search API is wired in.
+2. The owner's actual detailed profile write-up: certificates, work history, a real bio, and a goals narrative — this is what discovery's query generation runs on, so a thin profile means thin discovery regardless of which search API is wired in.
 3. Which documents may be uploaded automatically into the vault, and which always require manual selection.
 4. Is the first deployment local/self-hosted, a private server, or cloud-hosted in an approved jurisdiction?
 5. Which email provider and OAuth scopes are acceptable for read-only ingestion?
