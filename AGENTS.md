@@ -22,20 +22,35 @@ agents divide and hand off work*, not what the product is.
 ## Current status
 
 MVP vertical: scholarships only, read-only, no browser automation, no submission
-(`SOLUTION_DEFINITION.md` §10, "MVP: the scholarship inbox"). As of the last commit
-in this file's history: models, matching engine, opportunity dedup, a digest
-formatter, a full workflow API (`PUT /profile`, `POST /opportunities`,
-`GET /matches`, `POST /opportunities/{id}/feedback`, `GET /digest`), and a
-file-backed `ProfileStore` all exist, covered by 25 passing tests. Run
-`.venv/Scripts/python.exe -m pytest -q` to confirm current state — don't trust this
-paragraph once it's a few commits old, trust the test run.
+(`SOLUTION_DEFINITION.md` §10, "MVP: the scholarship inbox"), now pivoted to
+profile-driven discovery instead of a curated source list — see the spec's latest
+commit if that sentence is a surprise. As of the last commit in this file's
+history: models (including certificates/work_history for query generation),
+matching engine, opportunity dedup, a digest formatter, a full workflow API
+(`PUT /profile`, `POST /opportunities`, `GET /matches`,
+`POST /opportunities/{id}/feedback`, `GET /digest`) with atomic file-backed
+persistence built directly into `OpportunityStore`, a `SourceRegistry` for known
+fixed portals, and a first pass at profile→query generation in `discovery.py`,
+covered by 26 passing tests. Run `.venv/Scripts/python.exe -m pytest -q` to
+confirm current state — don't trust this paragraph once it's a few commits old,
+trust the test run.
 
-**Known gap, next up:** `OpportunityStore` in `store.py` (the thing the API
-actually uses) is in-memory only — a restart loses the profile and every tracked
-opportunity. `storage.py`'s `ProfileStore` (file-backed, tested) exists to be
-wired in as `OpportunityStore`'s backing store but isn't plugged in yet. Whoever
-gets there first: this is the one clear "finish the thread" item, not a place to
-start something new.
+(The earlier "known gap" here — in-memory-only `OpportunityStore` — is closed;
+Codex solved it directly with atomic temp-file+replace writes in `store.py`,
+which also covers opportunities and feedback, not just the profile. A separate
+`storage.py`/`ProfileStore` had been built in parallel to fix the same gap;
+removed as redundant once the two efforts landed on the same problem — this is
+the kind of overlap this file exists to prevent, and it still happened once, so
+check `git log` before assuming an old status line is current.)
+
+**Real gap, blocking, next up:** `discovery.py`'s `build_search_urls()` builds
+literal `google.com/search?q=...` URLs. Nothing should fetch these — see
+`SOLUTION_DEFINITION.md` §6 for why (Google's terms, plus it's not parseable
+without a headless browser) and for the recommendation (Tavily, Brave as
+alternative). This needs an actual decision + API key from the human before it's
+buildable — flagged to them; not something either of us resolves alone. Until
+then, `build_search_queries()` (the query strings themselves, not the URLs) is
+solid and worth building the extraction pipeline's interface around.
 
 ## Lane ownership
 
@@ -45,14 +60,15 @@ it's kept current.
 
 | Lane | Files | Owner | Status |
 |---|---|---|---|
-| Models / contracts | `models.py` | Codex | active: enrich personal profile for discovery |
+| Models / contracts | `models.py` | shared | additive only — extend, don't restructure, without a note here first |
 | Matching engine | `matching.py` | Codex | active |
 | Ingestion / dedup | `ingestion.py` | Codex | merge logic done; real fetching not started |
-| Workflow API | `api.py`, `store.py` | Codex | active: wire file-backed store and profile-driven workflow |
+| Workflow API + persistence | `api.py`, `store.py` | Codex | done for MVP scope, atomic persistence included |
 | Digest / review workspace | `digest.py` | Claude | done for MVP scope |
-| Profile persistence | `storage.py` | Claude | built, not yet wired into `store.py` — see gap above |
-| Source registry + real connectors (§10 MVP) | `sources.py`, `discovery.py` | Codex | active: profile-driven permitted-source discovery |
-| Drafting / package builder | not started | open | after the persistence gap closes |
+| Source registry (fixed portals) | `sources.py` | Codex | registry primitive done, not populated yet |
+| Discovery (profile → search) | `discovery.py` | Codex | query generation done; blocked on search API choice, see gap above |
+| Extraction (search result → Opportunity draft) | not started | open | needs the search API decision first — its output shape depends on which provider |
+| Drafting / package builder | not started | open | after extraction exists |
 
 ## Review protocol
 
