@@ -45,13 +45,13 @@ it's kept current.
 
 | Lane | Files | Owner | Status |
 |---|---|---|---|
-| Models / contracts | `models.py` | Codex | stable, extend as needed |
+| Models / contracts | `models.py` | Codex | active: enrich personal profile for discovery |
 | Matching engine | `matching.py` | Codex | active |
 | Ingestion / dedup | `ingestion.py` | Codex | merge logic done; real fetching not started |
-| Workflow API | `api.py`, `store.py` | Codex | profile/opportunities/matches/feedback/digest wired up; store is in-memory only |
+| Workflow API | `api.py`, `store.py` | Codex | active: wire file-backed store and profile-driven workflow |
 | Digest / review workspace | `digest.py` | Claude | done for MVP scope |
 | Profile persistence | `storage.py` | Claude | built, not yet wired into `store.py` — see gap above |
-| Source registry + real connectors (§10 MVP) | not started | open | needs the 5–15 source list from the human first |
+| Source registry + real connectors (§10 MVP) | `sources.py`, `discovery.py` | Codex | active: profile-driven permitted-source discovery |
 | Drafting / package builder | not started | open | after the persistence gap closes |
 
 ## Review protocol

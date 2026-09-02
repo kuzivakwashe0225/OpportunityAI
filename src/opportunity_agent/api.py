@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI
 from fastapi import HTTPException
 from pydantic import BaseModel
@@ -7,7 +9,7 @@ from .models import Opportunity, PersonalProfile
 from .store import OpportunityStore
 
 app = FastAPI(title="Opportunity Agent")
-store = OpportunityStore()
+store = OpportunityStore(path=os.getenv("OPPORTUNITY_AGENT_STORE_PATH", ".data/store.json"))
 
 
 class Feedback(BaseModel):

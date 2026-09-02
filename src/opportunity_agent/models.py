@@ -12,6 +12,11 @@ class PersonalProfile(BaseModel):
     field: str | None = None
     documents: list[str] = Field(default_factory=list)
     interests: list[str] = Field(default_factory=list)
+    goals: list[str] = Field(default_factory=list)
+    history: str | None = None
+    achievements: list[str] = Field(default_factory=list)
+    preferred_countries: list[str] = Field(default_factory=list)
+    preferred_funding: list[str] = Field(default_factory=list)
 
 
 class Opportunity(BaseModel):
