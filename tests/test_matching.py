@@ -88,6 +88,18 @@ def test_expired_opportunity_is_ineligible():
     assert any("expired" in item.lower() for item in result.failed_requirements)
 
 
+def test_country_matching_does_not_substring_match():
+    # "Niger" is a substring of "Nigeria" (and Sudan/South Sudan, Guinea/Guinea-Bissau
+    # follow the same trap) — country eligibility must compare whole names, not text.
+    result = match_opportunity(
+        make_opportunity(eligible_countries=["Niger"]),
+        make_profile(country="Nigeria"),
+    )
+
+    assert result.status == "ineligible"
+    assert any("country" in reason.lower() for reason in result.failed_requirements)
+
+
 def test_interest_fit_changes_score():
     broad = match_opportunity(
         make_opportunity(evidence=["eligibility evidence"], interests=["leadership"]),

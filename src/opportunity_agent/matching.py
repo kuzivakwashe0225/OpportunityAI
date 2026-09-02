@@ -10,6 +10,18 @@ def _contains(value: str | None, options: list[str]) -> bool | None:
     return any(option.casefold() in normalized for option in options)
 
 
+def _exact_match(value: str | None, options: list[str]) -> bool | None:
+    """Whole-value match, case-insensitive.
+
+    Country names must not use substring matching: "Niger" is a substring of
+    "Nigeria", and the same trap catches Sudan/South Sudan and Guinea/Guinea-Bissau.
+    """
+    if value is None:
+        return None
+    normalized = value.casefold()
+    return any(option.casefold() == normalized for option in options)
+
+
 def match_opportunity(
     opportunity: Opportunity,
     profile: PersonalProfile,
@@ -28,7 +40,7 @@ def match_opportunity(
         failed.append("opportunity is expired")
 
     if opportunity.eligible_countries:
-        country_match = _contains(profile.country, opportunity.eligible_countries)
+        country_match = _exact_match(profile.country, opportunity.eligible_countries)
         if country_match is True:
             matched.append("country")
         elif country_match is False:
