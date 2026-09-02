@@ -8,7 +8,9 @@ The product should begin as an **opportunity intelligence and application-prepar
 
 ## MVP decision
 
-The earliest useful MVP is **Scholarship Scout**: a read-only service that watches 3 to 5 agreed scholarship sources, extracts and verifies new opportunities, matches them against one structured personal profile, and sends a concise digest with deadlines, fit reasons, requirements, evidence links, and missing information.
+The earliest useful MVP is **Scholarship Scout**: a read-only service that discovers scholarship opportunities by generating search queries from the owner's own profile — field, certificates, work history, interests, and a narrative of their goals — rather than a hand-picked list of sites, extracts and verifies what those searches surface, matches it against the structured profile, and sends a concise digest with deadlines, fit reasons, requirements, evidence links, and missing information.
+
+This was a deliberate revision from the original MVP shape: a curated 3–5-source list is faster to stub but puts a ceiling on the product that defeats the point — the owner would still have to know an opportunity's source existed before the system could watch it. Profile-driven discovery costs one more real dependency (a search API, below) but is the only version of this that scales the way the problem statement in §2 actually needs. `discovery.py`'s current `build_search_queries()` is on the right track (queries built from profile fields); `build_search_urls()` is not — see §6's discovery search API note before anything fetches those URLs.
 
 The MVP deliberately does not log in to portals, submit forms, send applications, scrape LinkedIn or Indeed, process eGP bids, or fine-tune a model. It proves the highest-value uncertainty first: whether the system can find relevant opportunities and explain eligibility accurately enough that the owner trusts its shortlist.
 
@@ -25,7 +27,7 @@ The MVP deliberately does not log in to portals, submit forms, send applications
 ### MVP user journey
 
 1. The owner creates a personal profile and uploads a CV or manually enters the facts that control eligibility.
-2. The owner selects 3 to 5 permitted scholarship sources and a digest schedule.
+2. The owner writes a detailed profile — not just structured facts but a real narrative: certificates, work history, a bio, and what they're actually trying to achieve — which the system turns into search queries instead of the owner having to name sources.
 3. The collector retrieves source pages and attachments, archives evidence, and creates normalized opportunity records.
 4. The extraction and matching pipeline produces `eligible`, `ineligible`, or `needs review`, plus an explainable ranking for eligible items.
 5. The owner receives a digest and opens the evidence-backed detail view.
@@ -63,11 +65,11 @@ Reduce the time from opportunity publication to a verified, submission-ready pac
 
 ### Individual profile
 
-Scholarships, fellowships, courses, grants, internships, and jobs. The profile includes education, grades, skills, work history, location, work authorization, interests, constraints, references, portfolio links, and reusable answer material.
+Scholarships, fellowships, courses, grants, internships, and jobs. The profile includes education, grades, skills, work history, location, work authorization, interests, constraints, references, portfolio links, and reusable answer material — plus, critically for discovery, certificates/qualifications and a written narrative (a real bio and a statement of goals, not just tags) that the query generator in §5.1 reads to figure out what to search for in the first place. A profile that's just structured fields with no narrative gives discovery almost nothing to work with; the depth of what the owner writes here directly bounds how well the system can find things on its own.
 
 ### Company profile
 
-Zimbabwe tenders and supplier opportunities. The profile includes legal entity details, tax and registration records, PRAZ/eGP account information, categories, certificates, directors and signatories, past performance, capacity, bank details, pricing rules, partners, and approved bid templates.
+Zimbabwe tenders and supplier opportunities. The profile includes legal entity details, tax and registration records, PRAZ/eGP account information, categories, certificates, directors and signatories, past performance, capacity, bank details, pricing rules, partners, and approved bid templates — plus the same kind of narrative the individual profile needs: the company's history, what it's actually capable of delivering, and its registration standing, so discovery can be pointed at tender categories that genuinely match rather than everything PRAZ publishes. Not built yet — this is Phase 4 (§10), captured here so the schema shape is known in advance.
 
 ### Initial opportunity lifecycle
 
@@ -97,7 +99,7 @@ flowchart LR
 ### Core services
 
 1. **Source registry and connectors**
-   - A registry records each source, access method, refresh frequency, allowed automation, parser version, and health status.
+   - Two discovery modes, not one: a small **registry** (`sources.py`) for the handful of known, fixed, authoritative portals (PRAZ eGP is exactly this — one portal, not something to "search" for), and **profile-driven search** (`discovery.py`) for the open-ended long tail of scholarships, grants, and most jobs, where no fixed list could ever be complete. The registry records each source's access method, refresh frequency, allowed automation, parser version, and health status; the search path turns the owner's profile into queries against a real search API — see the discovery search API note below, not a scraped search-engine results page.
    - Prefer official APIs, feeds, email notifications, downloadable notices, and structured pages.
    - Use deterministic scrapers for known sources. Use browser automation only where necessary.
    - Store the original URL, retrieval time, page/PDF hash, and evidence excerpt for every material fact.
@@ -171,6 +173,17 @@ This shape minimizes setup and operational cost while keeping the data model com
 | Job-board discovery | [python-jobspy](https://github.com/speedyapply/JobSpy) | Aggregates LinkedIn, Indeed, Glassdoor, Google, and ZipRecruiter public search results into one normalized feed for the jobs track (Phase 3) | Reads public listings only — never logs into your account, so it stays outside job-board bot-detection entirely. MIT. |
 | Browser agent (alternative) | [Skyvern](https://github.com/skyvern-ai/skyvern) | Vision + LLM browser agent, self-hostable, with a workflow builder; already used in production for government-form and job-application automation | Scores 85.8% on the WebVoyager benchmark vs. Browser Use's 89.1% — evaluate both against the target portal's actual pages before choosing. AGPL-3.0, which is more restrictive to redistribute than the MIT tools above. |
 
+### Discovery search API — a real, currently-live dependency
+
+`discovery.py`'s `build_search_urls()` currently constructs literal `google.com/search?q=...` URLs. **Do not build a fetcher against these.** Scraping Google's own results page violates Google's terms the same way §8 rules out scraping LinkedIn, and practically it returns a JS-rendered page a plain HTTP client can't parse without a full headless browser fighting CAPTCHAs. This isn't a hypothetical: as of this writing there is no good free path left here —
+
+- **Bing Web Search API** was retired by Microsoft on 11 August 2025; no new keys are issued.
+- **Google Custom Search JSON API** is closed to new signups and is being fully shut down 1 January 2027 — not worth building against for a new project.
+- Self-hosted **SearXNG** (open source, no key, no quota) is the honest free option, but as of mid-2026 its upstream engines increasingly CAPTCHA a single self-hosted IP — Google/Brave/Startpage frequently come back suspended or unparseable, leaving only DuckDuckGo reliable. Fine as a zero-cost fallback, not a foundation.
+- **Tavily** and **Brave Search API** are the two realistic options: both are current, both have a usable free tier for one profile's query volume (a handful of queries per run, well under either's monthly cap), and Tavily specifically returns clean extracted snippets rather than raw SERP HTML, which drops straight into the extraction step in §5.2. Recommendation: **Tavily first**, Brave as the alternative if its independent index or pricing fits better once volume is known.
+
+This needs a decision and an API key from the owner before `discovery.py` can be wired to anything live — see §12.
+
 ### Recommendation
 
 Use **Python + FastAPI + PostgreSQL + object storage** for the MVP, with a small scheduled worker and deterministic scholarship connectors. Add pgvector and LangGraph only when the evaluation results justify them. Later, use Crawlee or a Python equivalent for collection and Playwright for deterministic browser adapters; evaluate Browser Use or Skyvern for narrow, supervised tasks. Add n8n only at the integration edge if it reduces work without becoming the system of record.
@@ -226,10 +239,10 @@ The sequencing below is deliberately front-loaded toward one thing: get a trustw
 
 ### MVP: the scholarship inbox (target: weeks, not months)
 
-Single vertical (scholarships), single user profile, one curated source list you already know and trust — no broad crawler discovery yet.
+Single vertical (scholarships), single user profile, discovery driven by that profile rather than a fixed list.
 
-- Profile onboarding for one person: education, grades, skills, work history, constraints, reusable answer material; documents uploaded manually into the vault (transcripts, ID, certificates, reference letters).
-- A short, hand-picked source registry (5–15 sites/feeds/email senders you already watch) rather than open-ended web discovery — expand the registry only after the pipeline is proven.
+- Profile onboarding for one person: education, grades, skills, work history, certificates, a written bio and goals narrative, constraints, reusable answer material; documents uploaded manually into the vault (transcripts, ID, certificates, reference letters).
+- Query generation from the profile (`discovery.py`) against a real search API (Tavily/Brave — §6), not a hand-picked source list and not a scraped Google results page.
 - Read-only ingestion: fetch pages/PDFs, extract into the versioned schema (§5.2), deduplicate.
 - Matching engine: hard eligibility rules first, then explainable ranking (§5.4) — this is the part worth getting right before anything else, since a wrong "yes" here wastes review time and a wrong "no" hides a real opportunity.
 - For each shortlisted match: a **drafted, submission-ready package** — tailored CV/cover-letter or essay draft, a requirement checklist, and every generated claim linked back to a profile fact or source document — landing in the review workspace with a deadline reminder.
@@ -272,7 +285,8 @@ Resolved:
 
 MVP-blocking — needed before Phase 1 build starts:
 
-2. The 5–15 scholarship sources/feeds/email senders to seed the source registry with.
+2. A search API provider for `discovery.py` — Tavily (recommended, §6) or Brave — and an API key. Nothing can be fetched live until this is chosen; `build_search_urls()`'s current literal-Google-search approach is not viable, see §6.
+2b. The owner's actual detailed profile write-up: certificates, work history, a real bio, and a goals narrative — this is what discovery's query generation runs on, so a thin profile means thin discovery regardless of which search API is wired in.
 3. Which documents may be uploaded automatically into the vault, and which always require manual selection.
 4. Is the first deployment local/self-hosted, a private server, or cloud-hosted in an approved jurisdiction?
 5. Which email provider and OAuth scopes are acceptable for read-only ingestion?
