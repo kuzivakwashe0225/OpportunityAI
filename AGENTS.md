@@ -23,10 +23,19 @@ agents divide and hand off work*, not what the product is.
 
 MVP vertical: scholarships only, read-only, no browser automation, no submission
 (`SOLUTION_DEFINITION.md` §10, "MVP: the scholarship inbox"). As of the last commit
-in this file's history: models, matching engine, opportunity dedup, API health
-check, and a digest formatter exist, all covered by passing tests. Run
+in this file's history: models, matching engine, opportunity dedup, a digest
+formatter, a full workflow API (`PUT /profile`, `POST /opportunities`,
+`GET /matches`, `POST /opportunities/{id}/feedback`, `GET /digest`), and a
+file-backed `ProfileStore` all exist, covered by 25 passing tests. Run
 `.venv/Scripts/python.exe -m pytest -q` to confirm current state — don't trust this
 paragraph once it's a few commits old, trust the test run.
+
+**Known gap, next up:** `OpportunityStore` in `store.py` (the thing the API
+actually uses) is in-memory only — a restart loses the profile and every tracked
+opportunity. `storage.py`'s `ProfileStore` (file-backed, tested) exists to be
+wired in as `OpportunityStore`'s backing store but isn't plugged in yet. Whoever
+gets there first: this is the one clear "finish the thread" item, not a place to
+start something new.
 
 ## Lane ownership
 
@@ -39,11 +48,11 @@ it's kept current.
 | Models / contracts | `models.py` | Codex | stable, extend as needed |
 | Matching engine | `matching.py` | Codex | active |
 | Ingestion / dedup | `ingestion.py` | Codex | merge logic done; real fetching not started |
-| API | `api.py` | Codex | health check only so far |
-| Digest / review workspace | `digest.py` | Claude | first cut done |
-| Profile & document vault (persistence) | not started | Claude | next up |
+| Workflow API | `api.py`, `store.py` | Codex | profile/opportunities/matches/feedback/digest wired up; store is in-memory only |
+| Digest / review workspace | `digest.py` | Claude | done for MVP scope |
+| Profile persistence | `storage.py` | Claude | built, not yet wired into `store.py` — see gap above |
 | Source registry + real connectors (§10 MVP) | not started | open | needs the 5–15 source list from the human first |
-| Drafting / package builder | not started | open | after vault exists |
+| Drafting / package builder | not started | open | after the persistence gap closes |
 
 ## Review protocol
 
