@@ -3,6 +3,7 @@ from datetime import date
 from fastapi.testclient import TestClient
 
 from opportunity_agent.api import app, store
+from opportunity_agent.search import SearchResult
 
 
 client = TestClient(app)
@@ -79,6 +80,43 @@ def test_missing_profile_prevents_matching():
     response = client.get("/matches")
 
     assert response.status_code == 409
+
+
+def test_discover_stores_search_result_drafts(monkeypatch):
+    client.put("/profile", json=profile_payload())
+
+    def fake_discover(profile, *, api_key):
+        return [SearchResult(
+            title="Discovered Award",
+            url="https://scholarships.example.org/award",
+            content="Official eligibility notice",
+        )]
+
+    monkeypatch.setattr("opportunity_agent.api.discover", fake_discover)
+    monkeypatch.setenv("TAVILY_API_KEY", "test-key")
+    response = client.post("/discover")
+
+    assert response.status_code == 200
+    assert response.json()["added"] == 1
+    assert response.json()["opportunities"][0]["title"] == "Discovered Award"
+
+
+def test_repeated_discovery_does_not_duplicate_urls(monkeypatch):
+    client.put("/profile", json=profile_payload())
+
+    def fake_discover(profile, *, api_key):
+        return [SearchResult(
+            title="Same Award",
+            url="https://scholarships.example.org/award#details",
+            content="Official eligibility notice",
+        )]
+
+    monkeypatch.setattr("opportunity_agent.api.discover", fake_discover)
+    monkeypatch.setenv("TAVILY_API_KEY", "test-key")
+    client.post("/discover")
+    client.post("/discover")
+
+    assert len(client.get("/matches").json()) == 1
 
 
 def test_dismissed_opportunity_is_removed_from_digest():

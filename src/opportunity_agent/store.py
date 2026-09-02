@@ -5,6 +5,8 @@ from uuid import uuid4
 
 from .matching import match_opportunity
 from .models import MatchResult, Opportunity, PersonalProfile
+from .discovery import canonicalize_url
+from .ingestion import merge_opportunity
 
 
 @dataclass
@@ -36,6 +38,12 @@ class OpportunityStore:
         return profile
 
     def add_opportunity(self, opportunity: Opportunity) -> StoredOpportunity:
+        canonical_url = canonicalize_url(str(opportunity.url))
+        for stored in self.opportunities:
+            if canonicalize_url(str(stored.opportunity.url)) == canonical_url:
+                stored.opportunity = merge_opportunity(stored.opportunity, opportunity)
+                self._persist()
+                return stored
         stored = StoredOpportunity(id=str(uuid4()), opportunity=opportunity)
         self.opportunities.append(stored)
         self._persist()

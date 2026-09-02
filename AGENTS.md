@@ -47,16 +47,12 @@ check `git log` before assuming an old status line is current.)
 tested client — `search(query, api_key=..., max_results=...) -> list[SearchResult]`
 — verified against Tavily's actual documented contract, not guessed.
 
-**Real gap, next up:** `discovery.py`'s `build_search_urls()` still builds
-literal `google.com/search?q=...` URLs — nothing should fetch these (see
-`SOLUTION_DEFINITION.md` §6). The fix is small: for each string from
-`build_search_queries()`, call `search.search(query, api_key=os.environ["TAVILY_API_KEY"])`
-instead of building a Google URL, and drop `build_search_urls()` once nothing
-calls it. Whoever's already in `discovery.py` should pick this up — it's a
-one-function swap now that the client exists, not a new design problem. The
-owner still needs to set `TAVILY_API_KEY` (sign up at tavily.com) before this
-can run against anything live; tests don't need it (`search.py`'s tests mock
-the HTTP transport).
+**Current gap:** the Tavily-backed discovery path and conservative search-result
+extraction now exist, but real scholarship source parsing is still intentionally
+shallow. The next connector should turn permitted public result pages/PDFs into
+structured deadlines, eligibility, requirements, and evidence metadata. The
+owner still needs to set `TAVILY_API_KEY` before live discovery can run; tests
+mock the client.
 
 ## Lane ownership
 
@@ -73,8 +69,8 @@ it's kept current.
 | Digest / review workspace | `digest.py` | Claude | done for MVP scope |
 | Source registry (fixed portals) | `sources.py` | Codex | registry primitive done, not populated yet |
 | Search client | `search.py` | Claude | done — Tavily, tested with mocked HTTP |
-| Discovery (profile → search) | `discovery.py` | Codex | query generation done; needs the one-function swap to `search.py`, see gap above |
-| Extraction (search result → Opportunity draft) | not started | open | input shape is now known: `search.SearchResult` (title, url, content, score) |
+| Discovery (profile → search) | `discovery.py`, `search.py` | Codex/Claude | Tavily-backed profile discovery done; bounded and URL-deduplicated |
+| Extraction (search result → Opportunity draft) | `extraction.py` | Codex | conservative evidence-preserving draft done; structured parser remains |
 | Drafting / package builder | not started | open | after extraction exists |
 
 ## Review protocol

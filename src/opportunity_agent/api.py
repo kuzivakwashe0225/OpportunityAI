@@ -5,6 +5,8 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 
 from .digest import build_digest
+from .discovery import discover
+from .extraction import result_to_opportunity
 from .models import Opportunity, PersonalProfile
 from .store import OpportunityStore
 
@@ -30,6 +32,21 @@ def save_profile(profile: PersonalProfile) -> PersonalProfile:
 def add_opportunity(opportunity: Opportunity) -> dict[str, object]:
     stored = store.add_opportunity(opportunity)
     return {"id": stored.id, "opportunity": stored.opportunity}
+
+
+@app.post("/discover")
+def run_discovery() -> dict[str, object]:
+    if store.profile is None:
+        raise HTTPException(status_code=409, detail="profile is required")
+    api_key = os.getenv("TAVILY_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="TAVILY_API_KEY is not configured")
+    results = discover(store.profile, api_key=api_key)
+    added = [store.add_opportunity(result_to_opportunity(result)) for result in results]
+    return {
+        "added": len(added),
+        "opportunities": [stored.opportunity for stored in added],
+    }
 
 
 @app.get("/matches")
