@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 from uuid import uuid4
+from datetime import datetime, timezone
 
 from .matching import match_opportunity
 from .models import MatchResult, Opportunity, PersonalProfile
@@ -18,9 +19,21 @@ class StoredOpportunity:
 
 
 @dataclass
+class DiscoveryRun:
+    id: str
+    started_at: str
+    completed_at: str
+    queries: list[str]
+    found: int
+    added: int
+    failures: list[str] = field(default_factory=list)
+
+
+@dataclass
 class OpportunityStore:
     profile: PersonalProfile | None = None
     opportunities: list[StoredOpportunity] = field(default_factory=list)
+    runs: list[DiscoveryRun] = field(default_factory=list)
     path: Path | str | None = None
 
     def __post_init__(self) -> None:
@@ -30,6 +43,7 @@ class OpportunityStore:
     def reset(self) -> None:
         self.profile = None
         self.opportunities.clear()
+        self.runs.clear()
         self._persist()
 
     def save_profile(self, profile: PersonalProfile) -> PersonalProfile:
@@ -68,6 +82,29 @@ class OpportunityStore:
                 return stored
         raise KeyError(opportunity_id)
 
+    def record_run(
+        self,
+        *,
+        queries: list[str],
+        found: int,
+        added: int,
+        failures: list[str],
+        started_at: str | None = None,
+    ) -> DiscoveryRun:
+        now = datetime.now(timezone.utc).isoformat()
+        record = DiscoveryRun(
+            id=str(uuid4()),
+            started_at=started_at or now,
+            completed_at=now,
+            queries=list(queries),
+            found=found,
+            added=added,
+            failures=list(failures),
+        )
+        self.runs.append(record)
+        self._persist()
+        return record
+
     def _persist(self) -> None:
         if self.path is None:
             return
@@ -83,6 +120,18 @@ class OpportunityStore:
                     "usefulness": stored.usefulness,
                 }
                 for stored in self.opportunities
+            ],
+            "runs": [
+                {
+                    "id": run.id,
+                    "started_at": run.started_at,
+                    "completed_at": run.completed_at,
+                    "queries": run.queries,
+                    "found": run.found,
+                    "added": run.added,
+                    "failures": run.failures,
+                }
+                for run in self.runs
             ],
         }
         temporary = path.with_suffix(f"{path.suffix}.tmp")
@@ -105,3 +154,4 @@ class OpportunityStore:
             )
             for item in payload.get("opportunities", [])
         ]
+        self.runs = [DiscoveryRun(**item) for item in payload.get("runs", [])]

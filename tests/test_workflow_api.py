@@ -152,6 +152,37 @@ def test_discovery_skips_malformed_and_untitled_results(monkeypatch):
     assert response.json()["opportunities"][0]["title"] == "Untitled scholarship opportunity"
 
 
+def test_discovery_exposes_run_audit_record(monkeypatch):
+    client.put("/profile", json=profile_payload())
+    monkeypatch.setattr("opportunity_agent.api.discover", lambda profile, *, api_key: [])
+    monkeypatch.setenv("TAVILY_API_KEY", "test-key")
+
+    response = client.post("/discover")
+    runs = client.get("/runs")
+
+    assert response.status_code == 200
+    assert response.json()["run_id"]
+    assert runs.json()[0]["id"] == response.json()["run_id"]
+    assert runs.json()[0]["found"] == 0
+
+
+def test_failed_discovery_still_records_run(monkeypatch):
+    client.put("/profile", json=profile_payload())
+
+    def failing_discover(profile, *, api_key):
+        raise RuntimeError("search unavailable")
+
+    monkeypatch.setattr("opportunity_agent.api.discover", failing_discover)
+    monkeypatch.setenv("TAVILY_API_KEY", "test-key")
+
+    response = client.post("/discover")
+    runs = client.get("/runs")
+
+    assert response.status_code == 502
+    assert runs.json()[0]["found"] == 0
+    assert "search unavailable" in runs.json()[0]["failures"][0]
+
+
 def test_dismissed_opportunity_is_removed_from_digest():
     client.put("/profile", json=profile_payload())
     opportunity_response = client.post("/opportunities", json=opportunity_payload())

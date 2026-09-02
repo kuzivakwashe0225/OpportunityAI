@@ -47,12 +47,13 @@ check `git log` before assuming an old status line is current.)
 tested client — `search(query, api_key=..., max_results=...) -> list[SearchResult]`
 — verified against Tavily's actual documented contract, not guessed.
 
-**Current gap:** the Tavily-backed discovery path and conservative search-result
-extraction now exist. Structured fields are extracted only from explicitly
-verified page/PDF text; Tavily snippets remain evidence-only. The next connector
-should fetch permitted public result pages/PDFs, record retrieval metadata, and
-pass verified content into the parser. The owner still needs to set
-`TAVILY_API_KEY` before live discovery can run; tests mock the client.
+**Current gap:** the Tavily-backed discovery path, safe public fetcher, verified
+extraction, and persisted aggregate discovery-run audit now exist. Structured
+fields are extracted only from explicitly verified page/PDF text; Tavily snippets
+remain evidence-only. The next observability increment is per-source status and
+structured provenance (content type, parser version, page/PDF references). The
+owner still needs to set `TAVILY_API_KEY` before live discovery can run; tests
+mock the client.
 
 ## Lane ownership
 

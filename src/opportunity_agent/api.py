@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 import httpx
@@ -9,7 +10,7 @@ from pydantic import BaseModel
 load_dotenv()
 
 from .digest import build_digest
-from .discovery import discover
+from .discovery import build_search_queries, discover
 from .connector import fetch_public_page
 from .extraction import page_to_opportunity
 from .models import Opportunity, PersonalProfile
@@ -46,20 +47,48 @@ def run_discovery() -> dict[str, object]:
     api_key = os.getenv("TAVILY_API_KEY")
     if not api_key:
         raise HTTPException(status_code=503, detail="TAVILY_API_KEY is not configured")
-    results = discover(store.profile, api_key=api_key)
+    started_at = datetime.now(timezone.utc).isoformat()
+    queries = build_search_queries(store.profile)
+    try:
+        results = discover(store.profile, api_key=api_key)
+    except Exception as error:
+        run = store.record_run(
+            queries=queries,
+            found=0,
+            added=0,
+            failures=[f"search: {error}"],
+            started_at=started_at,
+        )
+        raise HTTPException(status_code=502, detail=f"discovery failed; run {run.id}") from error
     added = []
+    failures = []
     for result in results:
         try:
             page = fetch_public_page(result.url)
             title = result.title or "Untitled scholarship opportunity"
             opportunity = page_to_opportunity(page, title=title)
         except (ValueError, httpx.HTTPError):
+            failures.append(result.url)
             continue
         added.append(store.add_opportunity(opportunity))
+    run = store.record_run(
+        queries=queries,
+        found=len(results),
+        added=len(added),
+        failures=failures,
+        started_at=started_at,
+    )
     return {
+        "run_id": run.id,
+        "found": len(results),
         "added": len(added),
         "opportunities": [stored.opportunity for stored in added],
     }
+
+
+@app.get("/runs")
+def get_runs() -> list[dict[str, object]]:
+    return [run.__dict__ for run in reversed(store.runs)]
 
 
 @app.get("/matches")
