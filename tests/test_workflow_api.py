@@ -164,6 +164,7 @@ def test_discovery_exposes_run_audit_record(monkeypatch):
     assert response.json()["run_id"]
     assert runs.json()[0]["id"] == response.json()["run_id"]
     assert runs.json()[0]["found"] == 0
+    assert runs.json()[0]["sources"] == []
 
 
 def test_failed_discovery_still_records_run(monkeypatch):
@@ -181,6 +182,25 @@ def test_failed_discovery_still_records_run(monkeypatch):
     assert response.status_code == 502
     assert runs.json()[0]["found"] == 0
     assert "search unavailable" in runs.json()[0]["failures"][0]
+
+
+def test_source_failure_preserves_error_detail(monkeypatch):
+    client.put("/profile", json=profile_payload())
+    monkeypatch.setattr(
+        "opportunity_agent.api.discover",
+        lambda profile, *, api_key: [SearchResult(title="Award", url="https://example.org/award")],
+    )
+    monkeypatch.setattr(
+        "opportunity_agent.api.fetch_public_page",
+        lambda url: (_ for _ in ()).throw(ValueError("response exceeds size limit")),
+    )
+    monkeypatch.setenv("TAVILY_API_KEY", "test-key")
+
+    client.post("/discover")
+    run = client.get("/runs").json()[0]
+
+    assert "response exceeds size limit" in run["failures"][0]
+    assert "response exceeds size limit" in run["sources"][0]["error"]
 
 
 def test_dismissed_opportunity_is_removed_from_digest():

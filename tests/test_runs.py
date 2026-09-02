@@ -9,6 +9,7 @@ def test_discovery_run_round_trips_with_counts(tmp_path):
         found=3,
         added=2,
         failures=["https://example.org/bad: timeout"],
+        sources=[{"url": "https://example.org/bad", "status": "failed", "error": "timeout"}],
     )
     restored = OpportunityStore(path=tmp_path / "store.json")
 
@@ -16,4 +17,5 @@ def test_discovery_run_round_trips_with_counts(tmp_path):
     assert restored.runs[0].found == 3
     assert restored.runs[0].added == 2
     assert restored.runs[0].failures == ["https://example.org/bad: timeout"]
+    assert restored.runs[0].sources[0]["status"] == "failed"
     assert restored.runs[0].completed_at

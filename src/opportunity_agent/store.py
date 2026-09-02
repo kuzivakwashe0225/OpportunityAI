@@ -27,6 +27,7 @@ class DiscoveryRun:
     found: int
     added: int
     failures: list[str] = field(default_factory=list)
+    sources: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -90,6 +91,7 @@ class OpportunityStore:
         added: int,
         failures: list[str],
         started_at: str | None = None,
+        sources: list[dict[str, str]] | None = None,
     ) -> DiscoveryRun:
         now = datetime.now(timezone.utc).isoformat()
         record = DiscoveryRun(
@@ -100,6 +102,7 @@ class OpportunityStore:
             found=found,
             added=added,
             failures=list(failures),
+            sources=list(sources or []),
         )
         self.runs.append(record)
         self._persist()
@@ -130,6 +133,7 @@ class OpportunityStore:
                     "found": run.found,
                     "added": run.added,
                     "failures": run.failures,
+                    "sources": run.sources,
                 }
                 for run in self.runs
             ],

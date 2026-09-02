@@ -58,25 +58,35 @@ def run_discovery() -> dict[str, object]:
             added=0,
             failures=[f"search: {error}"],
             started_at=started_at,
+            sources=[],
         )
         raise HTTPException(status_code=502, detail=f"discovery failed; run {run.id}") from error
     added = []
     failures = []
+    sources = []
     for result in results:
         try:
             page = fetch_public_page(result.url)
             title = result.title or "Untitled scholarship opportunity"
             opportunity = page_to_opportunity(page, title=title)
-        except (ValueError, httpx.HTTPError):
-            failures.append(result.url)
+        except Exception as error:
+            failures.append(f"{result.url}: {error}")
+            sources.append({"url": result.url, "status": "failed", "error": str(error)})
             continue
-        added.append(store.add_opportunity(opportunity))
+        try:
+            added.append(store.add_opportunity(opportunity))
+        except Exception as error:
+            failures.append(f"{result.url}: {error}")
+            sources.append({"url": result.url, "status": "failed", "error": str(error)})
+            continue
+        sources.append({"url": page.url, "status": "parsed"})
     run = store.record_run(
         queries=queries,
         found=len(results),
         added=len(added),
         failures=failures,
         started_at=started_at,
+        sources=sources,
     )
     return {
         "run_id": run.id,
