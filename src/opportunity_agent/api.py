@@ -1,8 +1,11 @@
 import os
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi import HTTPException
 from pydantic import BaseModel
+
+load_dotenv()
 
 from .digest import build_digest
 from .discovery import discover
