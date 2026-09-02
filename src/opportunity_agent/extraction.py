@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from .models import Opportunity
 from .search import SearchResult
 from .discovery import canonicalize_url
+from .connector import PublicPage
 
 
 def result_to_opportunity(result: SearchResult, *, verified: bool = False) -> Opportunity:
@@ -26,6 +27,19 @@ def result_to_opportunity(result: SearchResult, *, verified: bool = False) -> Op
         evidence=[content] if content else [],
         sources=[canonical_url],
     )
+
+
+def page_to_opportunity(page: PublicPage, *, title: str) -> Opportunity:
+    """Parse fetched public content and retain the retrieval integrity record."""
+    opportunity = result_to_opportunity(
+        SearchResult(title=title, url=page.url, content=page.content),
+        verified=True,
+    )
+    return opportunity.model_copy(update={
+        "retrieved_at": page.retrieved_at,
+        "content_sha256": page.sha256,
+        "requirements_verified": True,
+    })
 
 
 def _extract_deadline(content: str) -> date | None:

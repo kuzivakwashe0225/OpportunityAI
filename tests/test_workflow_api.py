@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from opportunity_agent.api import app, store
 from opportunity_agent.search import SearchResult
+from opportunity_agent.connector import PublicPage
 
 
 client = TestClient(app)
@@ -93,12 +94,17 @@ def test_discover_stores_search_result_drafts(monkeypatch):
         )]
 
     monkeypatch.setattr("opportunity_agent.api.discover", fake_discover)
+    monkeypatch.setattr(
+        "opportunity_agent.api.fetch_public_page",
+        lambda url: PublicPage(url=url, content="Applications close 1 December 2026.", retrieved_at="now", sha256="hash"),
+    )
     monkeypatch.setenv("TAVILY_API_KEY", "test-key")
     response = client.post("/discover")
 
     assert response.status_code == 200
     assert response.json()["added"] == 1
     assert response.json()["opportunities"][0]["title"] == "Discovered Award"
+    assert response.json()["opportunities"][0]["retrieved_at"] == "now"
 
 
 def test_repeated_discovery_does_not_duplicate_urls(monkeypatch):
@@ -112,11 +118,38 @@ def test_repeated_discovery_does_not_duplicate_urls(monkeypatch):
         )]
 
     monkeypatch.setattr("opportunity_agent.api.discover", fake_discover)
+    monkeypatch.setattr(
+        "opportunity_agent.api.fetch_public_page",
+        lambda url: PublicPage(url=url, content="Official eligibility notice", retrieved_at="now", sha256="hash"),
+    )
     monkeypatch.setenv("TAVILY_API_KEY", "test-key")
     client.post("/discover")
     client.post("/discover")
 
     assert len(client.get("/matches").json()) == 1
+
+
+def test_discovery_skips_malformed_and_untitled_results(monkeypatch):
+    client.put("/profile", json=profile_payload())
+
+    def fake_discover(profile, *, api_key):
+        return [
+            SearchResult(title="", url="https://example.org/untitled", content="details"),
+            SearchResult(title="Bad", url="not-a-url", content="details"),
+        ]
+
+    monkeypatch.setattr("opportunity_agent.api.discover", fake_discover)
+    monkeypatch.setattr(
+        "opportunity_agent.api.fetch_public_page",
+        lambda url: PublicPage(url=url, content="details", retrieved_at="now", sha256="hash"),
+    )
+    monkeypatch.setenv("TAVILY_API_KEY", "test-key")
+
+    response = client.post("/discover")
+
+    assert response.status_code == 200
+    assert response.json()["added"] == 1
+    assert response.json()["opportunities"][0]["title"] == "Untitled scholarship opportunity"
 
 
 def test_dismissed_opportunity_is_removed_from_digest():

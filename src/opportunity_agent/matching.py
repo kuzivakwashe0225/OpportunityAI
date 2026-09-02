@@ -34,6 +34,14 @@ def match_opportunity(
 
     if not opportunity.evidence:
         unknown.append("source evidence is required")
+    if opportunity.requirements_verified and not (
+        opportunity.eligible_countries
+        or opportunity.required_levels
+        or opportunity.required_fields
+        or opportunity.required_age_max is not None
+        or opportunity.required_documents
+    ):
+        unknown.append("verified eligibility requirements were not found")
 
     reference_date = as_of or date.today()
     if opportunity.deadline and opportunity.deadline < reference_date:

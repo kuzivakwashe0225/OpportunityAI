@@ -1,6 +1,8 @@
 from datetime import date
 
 from opportunity_agent.extraction import result_to_opportunity
+from opportunity_agent.extraction import page_to_opportunity
+from opportunity_agent.connector import PublicPage
 from opportunity_agent.search import SearchResult
 
 
@@ -70,3 +72,19 @@ def test_unverified_search_snippet_cannot_create_hard_requirements():
 
     assert opportunity.eligible_countries == []
     assert opportunity.deadline is None
+
+
+def test_verified_page_preserves_retrieval_metadata():
+    page = PublicPage(
+        url="https://example.org/award",
+        content="Applications close 1 December 2026.",
+        retrieved_at="2026-09-03T10:00:00+00:00",
+        sha256="abc123",
+    )
+
+    opportunity = page_to_opportunity(page, title="Award")
+
+    assert opportunity.deadline == date(2026, 12, 1)
+    assert opportunity.retrieved_at == page.retrieved_at
+    assert opportunity.content_sha256 == page.sha256
+    assert opportunity.requirements_verified is True

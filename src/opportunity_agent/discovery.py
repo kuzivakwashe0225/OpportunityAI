@@ -38,7 +38,10 @@ def discover(
     seen_urls: set[str] = set()
     for query in build_search_queries(profile):
         for result in search_fn(query, api_key=api_key, max_results=max_results):
-            canonical = canonicalize_url(result.url)
+            try:
+                canonical = canonicalize_url(result.url)
+            except ValueError:
+                continue
             if canonical in seen_urls:
                 continue
             seen_urls.add(canonical)

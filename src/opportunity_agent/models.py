@@ -34,6 +34,9 @@ class Opportunity(BaseModel):
     interests: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
+    retrieved_at: str | None = None
+    content_sha256: str | None = None
+    requirements_verified: bool = False
 
 
 class MatchResult(BaseModel):

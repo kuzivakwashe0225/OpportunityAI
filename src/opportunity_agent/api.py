@@ -1,6 +1,7 @@
 import os
 
 from dotenv import load_dotenv
+import httpx
 from fastapi import FastAPI
 from fastapi import HTTPException
 from pydantic import BaseModel
@@ -9,7 +10,8 @@ load_dotenv()
 
 from .digest import build_digest
 from .discovery import discover
-from .extraction import result_to_opportunity
+from .connector import fetch_public_page
+from .extraction import page_to_opportunity
 from .models import Opportunity, PersonalProfile
 from .store import OpportunityStore
 
@@ -45,7 +47,15 @@ def run_discovery() -> dict[str, object]:
     if not api_key:
         raise HTTPException(status_code=503, detail="TAVILY_API_KEY is not configured")
     results = discover(store.profile, api_key=api_key)
-    added = [store.add_opportunity(result_to_opportunity(result)) for result in results]
+    added = []
+    for result in results:
+        try:
+            page = fetch_public_page(result.url)
+            title = result.title or "Untitled scholarship opportunity"
+            opportunity = page_to_opportunity(page, title=title)
+        except (ValueError, httpx.HTTPError):
+            continue
+        added.append(store.add_opportunity(opportunity))
     return {
         "added": len(added),
         "opportunities": [stored.opportunity for stored in added],
