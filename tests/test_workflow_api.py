@@ -37,6 +37,7 @@ def opportunity_payload(title="STEM Award"):
         "required_fields": ["computer science"],
         "required_documents": ["transcript", "cv"],
         "evidence": ["official eligibility page"],
+        "requirements_verified": True,
         "interests": ["technology"],
     }
 
@@ -265,3 +266,22 @@ def test_usefulness_feedback_does_not_replace_shortlist_decision():
 
     assert response.json()["decision"] == "shortlisted"
     assert response.json()["usefulness"] == "useful"
+
+
+def test_package_endpoint_builds_reviewable_application_package():
+    client.put("/profile", json=profile_payload())
+    opportunity_response = client.post("/opportunities", json=opportunity_payload())
+    opportunity_id = opportunity_response.json()["id"]
+
+    response = client.get(f"/opportunities/{opportunity_id}/package")
+
+    assert response.status_code == 200
+    assert response.json()["opportunity_url"] == opportunity_payload()["url"]
+    assert response.json()["checklist"]
+    assert response.json()["evidence"] == ["official eligibility page"]
+
+
+def test_package_endpoint_requires_profile_and_known_opportunity():
+    response = client.get("/opportunities/missing/package")
+
+    assert response.status_code == 409

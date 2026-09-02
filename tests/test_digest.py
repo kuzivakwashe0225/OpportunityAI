@@ -14,6 +14,7 @@ def make_opportunity(**overrides):
         "eligible_countries": ["Zimbabwe"],
         "required_documents": ["transcript"],
         "evidence": ["official scholarship eligibility page"],
+        "requirements_verified": True,
     }
     values.update(overrides)
     return Opportunity(**values)

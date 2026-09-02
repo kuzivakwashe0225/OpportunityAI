@@ -12,7 +12,9 @@ load_dotenv()
 from .digest import build_digest
 from .discovery import build_search_queries, discover
 from .connector import fetch_public_page
+from .drafting import build_application_package
 from .extraction import PARSER_VERSION, page_to_opportunity
+from .matching import match_opportunity
 from .models import Opportunity, PersonalProfile
 from .store import OpportunityStore
 
@@ -104,6 +106,18 @@ def run_discovery() -> dict[str, object]:
 @app.get("/runs")
 def get_runs() -> list[dict[str, object]]:
     return [run.__dict__ for run in reversed(store.runs)]
+
+
+@app.get("/opportunities/{opportunity_id}/package")
+def get_application_package(opportunity_id: str):
+    if store.profile is None:
+        raise HTTPException(status_code=409, detail="profile is required")
+    try:
+        stored = store.get_opportunity(opportunity_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="opportunity not found") from error
+    match = match_opportunity(stored.opportunity, store.profile)
+    return build_application_package(store.profile, stored.opportunity, match)
 
 
 @app.get("/matches")

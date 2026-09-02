@@ -72,6 +72,12 @@ class OpportunityStore:
             for stored in self.opportunities
         ]
 
+    def get_opportunity(self, opportunity_id: str) -> StoredOpportunity:
+        for stored in self.opportunities:
+            if stored.id == opportunity_id:
+                return stored
+        raise KeyError(opportunity_id)
+
     def set_feedback(self, opportunity_id: str, feedback: str) -> StoredOpportunity:
         for stored in self.opportunities:
             if stored.id == opportunity_id:

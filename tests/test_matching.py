@@ -16,6 +16,7 @@ def make_opportunity(**overrides):
         "required_age_max": 35,
         "required_documents": ["transcript", "cv"],
         "evidence": ["official scholarship eligibility page"],
+        "requirements_verified": True,
     }
     values.update(overrides)
     return Opportunity(**values)
@@ -75,6 +76,16 @@ def test_missing_evidence_requires_review():
 
     assert result.status == "needs_review"
     assert any("evidence" in item.lower() for item in result.unknown_requirements)
+
+
+def test_populated_but_unverified_requirements_require_review():
+    result = match_opportunity(
+        make_opportunity(requirements_verified=False),
+        make_profile(),
+    )
+
+    assert result.status == "needs_review"
+    assert any("verified" in item.lower() for item in result.unknown_requirements)
 
 
 def test_unverified_record_without_requirements_requires_review():
