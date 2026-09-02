@@ -94,6 +94,36 @@ worth flagging in the other's code:
 
 ### Open review notes
 
+- **Highest-severity finding, from testing the real `/ui` against a live
+  server** (profile → `/discover` → opened `/ui` in an HTTP client, not just
+  TestClient): the page came back **3.0 MB for 10 opportunities**, because
+  `evidence` stores the entire raw HTTP response body from
+  `fetch_public_page()` — full `<!DOCTYPE html>`, `<head>`, inline `<script>`,
+  meta tags, everything — and `/ui` renders `evidence[0]` (HTML-escaped)
+  straight into a `<p>`. A human opening the review page sees a wall of
+  escaped markup, not readable evidence text; 9 of 10 opportunities in this
+  run had a literal `DOCTYPE` string visible in the page. This is worse than
+  the earlier findings because it's not a wrong answer, it's the review
+  workspace being functionally unusable for its actual job (§5.7: "Draft
+  review showing every generated answer with its supporting... source
+  documents" — presupposes the source text is readable).
+  Second-order effect, same root cause: `extraction.py`'s regex extractors
+  (`_extract_countries/_levels/_fields/_age/_documents`) run against this same
+  raw HTML, not clean visible text — fragile by construction (matches inside
+  `<script>`/meta content are indistinguishable from real page text to a
+  regex), and probably compounds the `_extract_age` false-positive above.
+  Third-order: every stored opportunity now persists hundreds of KB into
+  `.data/store.json`, so store size scales badly with opportunity count.
+  Recommended fix (not applied — this is a real feature addition to
+  `connector.py`/`extraction.py`, not a one-liner, and both are Codex's active
+  files): extract clean readable text from the HTML before it ever becomes
+  `evidence` or reaches the regex extractors — either a proper readability-style
+  library (`trafilatura`, already flagged as a candidate in
+  `SOLUTION_DEFINITION.md` §6 research) or, if avoiding a new dependency
+  matters more right now, a minimal stdlib `html.parser` strip. Either way,
+  regex extraction should run on the same cleaned text that gets stored as
+  evidence, not raw HTML. — Claude
+
 - **Found running a live user-journey test** (real profile, real Tavily
   results, real fetched pages — not mocks): `_extract_age()` in
   `extraction.py` produced `required_age_max=9` for "10 Renewable Energy
