@@ -72,8 +72,15 @@ it's kept current.
 | Search client | `search.py` | Claude | done — Tavily, tested with mocked HTTP |
 | Discovery (profile → search) | `discovery.py`, `search.py` | Codex/Claude | Tavily-backed profile discovery done; bounded and URL-deduplicated |
 | Extraction (search result → Opportunity draft) | `extraction.py` | Codex | conservative parser done; verified-content gate protects hard requirements |
-| Drafting / package builder | `drafting.py` | Claude | claimed, building now |
+| Drafting / package builder | `drafting.py` | Claude | done — checklist + cover-note draft, no LLM call, nothing unfounded in the output |
 | Test isolation | `tests/conftest.py` | Claude | done — module store singleton was defaulting to real `.data/store.json` in tests, fixed |
+
+**Not wired yet:** `drafting.build_application_package()` exists and is tested
+but has no API endpoint (e.g. `POST /opportunities/{id}/package`) — not adding
+one myself right now since `api.py` is mid-edit on the discovery/verification
+path. Small, obvious follow-up once that settles: call it with
+`store`'s stored opportunity + a fresh `match_opportunity()` call and return
+the `ApplicationPackage`.
 
 ## Review protocol
 
