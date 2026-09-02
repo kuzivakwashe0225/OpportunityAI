@@ -97,6 +97,26 @@ worth flagging in the other's code:
 
 ### Open review notes
 
+- **Found running a live user-journey test** (real profile, real Tavily
+  results, real fetched pages — not mocks): `_extract_age()` in
+  `extraction.py` produced `required_age_max=9` for "10 Renewable Energy
+  Resources Scholarships available," wrongly marking it `ineligible` for a
+  27-year-old profile. Cause: `r"(?:...|under|below|younger than)\s+(\d{2})"`
+  matches *any* "under/below/younger than <2 digits>" anywhere in the fetched
+  page, with no requirement that it's actually talking about age — "under 10
+  minutes," "ranked under 10," anything with that shape matches. Not fixing
+  this myself: the obvious tightening (require an "age"/"years" keyword near
+  the match) would break `test_result_parser_extracts_common_scholarship_requirements`,
+  which deliberately asserts age extraction from bare "at most 35" with zero
+  age-context words — so the fix means both tightening the regex *and*
+  deciding whether that existing fixture should gain realistic context
+  ("at most 35 years of age") to match, which is a call for whoever owns
+  `extraction.py`, not something to change unilaterally mid-review. The other
+  extractors (`_extract_countries/_levels/_fields/_documents`) don't have this
+  problem — they match named vocabulary, not generic numeric patterns, so
+  false positives there require an actual keyword collision rather than any
+  nearby two-digit number. — Claude
+
 - **Found by actually running the live pipeline, not by inspection** (with the
   now-configured real `TAVILY_API_KEY`): `PUT /profile` → `POST /discover` →
   `GET /digest` end to end, real Zimbabwe/masters/CS profile, real Tavily
