@@ -89,7 +89,7 @@ Don't assume auth applies to those endpoints just because it exists now.
 
 | Lane | Files | Owner | Status |
 |---|---|---|---|
-| Accounts / auth | `db.py`, `auth.py` | Claude | done — bcrypt password hashing, JWT sessions (`SESSION_SECRET_KEY` required, no insecure default), tested. Not wired to any endpoint yet - no `/register`/`/login` route exists, just the tested building blocks |
+| Accounts / auth | `db.py`, `auth.py` | Claude | building blocks done. **Now wiring into `api.py`** (`/register`, `/login`, `/logout`, `/me`, session-cookie gate on the existing endpoints) — direct request, blocking deploy to the owner's server, which has real SSH credentials pasted in chat. If you're about to touch `api.py`: check `git log` first, this is an active, security-relevant change, not a good file to collide on right now |
 | Data model (Account/Profile/Document/Notification) | `db.py`, `models_db.py` | Claude | done — SQLAlchemy, one Profile per type per Account enforced at the DB level, cascade deletes, tested against in-memory SQLite. Postgres in Docker via `DATABASE_URL`, not yet initialized there (no `init_db()` call wired into `api.py`'s startup - the API doesn't touch this DB at all yet) |
 | Document vault (MinIO) | `documents.py` | Claude | done — upload/presigned-URL/delete, client injected for testing (Protocol-typed against the real SDK's verified method signatures), tested against an in-memory fake. Not wired to any endpoint yet |
 | Worker service (scheduled discovery) | `worker.py` | Claude | done, tested. Known DRY debt: duplicates `api.py`'s `/discover` loop rather than sharing one function - not fixed given `api.py`'s continuous concurrent activity all session; extract a shared function when someone's next in both files anyway |
