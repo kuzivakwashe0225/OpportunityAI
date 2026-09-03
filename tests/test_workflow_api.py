@@ -42,6 +42,22 @@ def opportunity_payload(title="STEM Award"):
     }
 
 
+def test_get_profile_returns_null_before_one_is_saved():
+    response = client.get("/profile")
+
+    assert response.status_code == 200
+    assert response.json() is None
+
+
+def test_get_profile_returns_the_saved_profile():
+    client.put("/profile", json=profile_payload())
+
+    response = client.get("/profile")
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Test Applicant"
+
+
 def test_profile_opportunity_match_and_feedback_flow():
     profile_response = client.put("/profile", json=profile_payload())
     assert profile_response.status_code == 200

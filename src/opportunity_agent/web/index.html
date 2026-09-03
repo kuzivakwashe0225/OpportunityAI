@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scholarship Scout</title>
+<style>
+  :root{
+    --bg:#f4f0e8; --surface:#fffdf8; --ink:#18211b; --ink-soft:#536157;
+    --line:#d8d2c5; --accent:#934326; --accent-soft:#f1e3d8;
+    --ok:#2f6d4f; --ok-soft:#e3efe7; --warn:#9a6b12; --warn-soft:#f6ecd6;
+    --bad:#a33b2d; --bad-soft:#f5e2de;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:Georgia,"Times New Roman",serif;color:var(--ink);background:var(--bg);}
+  main{max-width:960px;margin:0 auto;padding:40px 24px 96px;}
+  h1{font-size:clamp(2rem,5vw,3.4rem);margin:0 0 4px;}
+  .intro{color:var(--ink-soft);margin:0 0 28px;font-size:1.05rem;}
+  section{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:22px 24px;margin-bottom:20px;}
+  section > h2{margin:0 0 14px;font-size:1.25rem;}
+  label{display:block;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.82rem;color:var(--ink-soft);margin:14px 0 4px;}
+  label:first-child{margin-top:0;}
+  input[type=text], input[type=number], select, textarea{
+    width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:4px;
+    font-family:ui-sans-serif,system-ui,sans-serif;font-size:.95rem;background:#fff;color:var(--ink);
+  }
+  textarea{min-height:64px;resize:vertical;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 16px;}
+  .tag-input{display:flex;flex-wrap:wrap;gap:6px;padding:7px;border:1px solid var(--line);border-radius:4px;background:#fff;}
+  .tag-input input{border:none;flex:1;min-width:120px;padding:4px;font-size:.9rem;font-family:ui-sans-serif,system-ui,sans-serif;}
+  .tag-input input:focus{outline:none;}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--accent-soft);color:var(--accent);
+    border-radius:14px;padding:3px 6px 3px 10px;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.82rem;white-space:nowrap;}
+  .chip button{border:none;background:none;color:var(--accent);cursor:pointer;font-size:.95rem;line-height:1;padding:2px;}
+  .btn{border:1px solid var(--accent);background:var(--accent);color:#fff;padding:10px 16px;border-radius:4px;
+    cursor:pointer;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.92rem;font-weight:600;}
+  .btn:hover{filter:brightness(1.06);}
+  .btn:disabled{opacity:.55;cursor:progress;}
+  .btn.ghost{background:transparent;color:var(--accent);}
+  .btn.small{padding:6px 11px;font-size:.82rem;font-weight:500;}
+  .btn.danger{border-color:var(--bad);color:var(--bad);background:transparent;}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .status-line{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.85rem;color:var(--ink-soft);margin-top:10px;}
+  .status-line.err{color:var(--bad);}
+  .status-line.ok{color:var(--ok);}
+  #error-banner{display:none;background:var(--bad-soft);color:var(--bad);border:1px solid var(--bad);
+    border-radius:4px;padding:10px 14px;margin-bottom:16px;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.9rem;}
+  #error-banner button{float:right;border:none;background:none;color:var(--bad);cursor:pointer;font-weight:700;}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;}
+  .tab{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.85rem;padding:7px 13px;border-radius:20px;
+    border:1px solid var(--line);background:#fff;color:var(--ink-soft);cursor:pointer;}
+  .tab.active{background:var(--ink);border-color:var(--ink);color:#fff;}
+  .opportunity{border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:4px;padding:18px 20px;margin-bottom:14px;}
+  .opportunity.dismissed{opacity:.45;}
+  .opp-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline;}
+  .opp-head h3{margin:0;font-size:1.08rem;}
+  .badge{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.72rem;font-weight:700;text-transform:uppercase;
+    letter-spacing:.03em;padding:3px 9px;border-radius:20px;white-space:nowrap;}
+  .badge.eligible{background:var(--ok-soft);color:var(--ok);}
+  .badge.needs_review{background:var(--warn-soft);color:var(--warn);}
+  .badge.ineligible{background:var(--bad-soft);color:var(--bad);}
+  .meta{color:var(--ink-soft);font-family:ui-sans-serif,system-ui,sans-serif;font-size:.85rem;margin:6px 0;}
+  .reasons{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.85rem;margin:8px 0;}
+  .reasons.blockers{color:var(--bad);}
+  .evidence-preview{font-size:.92rem;color:var(--ink-soft);margin:8px 0;white-space:pre-wrap;word-break:break-word;}
+  .evidence-toggle{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.78rem;color:var(--accent);
+    background:none;border:none;cursor:pointer;padding:0;text-decoration:underline;}
+  .opp-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+  .decision-tag{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.78rem;background:var(--ink);color:#fff;
+    border-radius:20px;padding:3px 10px;margin-left:8px;}
+  .package-panel{display:none;margin-top:14px;padding:14px 16px;background:var(--accent-soft);border-radius:4px;
+    font-family:ui-sans-serif,system-ui,sans-serif;font-size:.88rem;}
+  .package-panel pre{white-space:pre-wrap;background:#fff;padding:12px;border-radius:4px;border:1px solid var(--line);font-family:inherit;}
+  .package-panel ul{margin:6px 0;padding-left:20px;}
+  .empty{padding:20px 0;color:var(--ink-soft);font-family:ui-sans-serif,system-ui,sans-serif;}
+  #runs-panel, #digest-panel{display:none;margin-top:14px;}
+  table{width:100%;border-collapse:collapse;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.85rem;}
+  th, td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);}
+  #digest-panel{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.9rem;}
+  #digest-panel h3{font-size:1rem;margin:16px 0 8px;}
+  #digest-panel li{margin-bottom:10px;}
+  .spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.5);
+    border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;margin-right:7px;vertical-align:-2px;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  @media (max-width:640px){ .grid2{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<main>
+  <h1>Scholarship Scout</h1>
+  <p class="intro">A quiet inbox for opportunities worth your attention.</p>
+
+  <div id="error-banner"><button id="error-dismiss" type="button" aria-label="Dismiss">&times;</button><span id="error-text"></span></div>
+
+  <section id="profile-section">
+    <h2>Your profile</h2>
+    <form id="profile-form">
+      <div class="grid2">
+        <div>
+          <label for="f-name">Name</label>
+          <input id="f-name" name="name" type="text" required>
+          <label for="f-country">Country</label>
+          <input id="f-country" name="country" type="text">
+          <label for="f-age">Age</label>
+          <input id="f-age" name="age" type="number" min="0" max="120">
+          <label for="f-study-level">Study level</label>
+          <select id="f-study-level" name="study_level">
+            <option value="">Not specified</option>
+            <option value="undergraduate">Undergraduate</option>
+            <option value="bachelors">Bachelors</option>
+            <option value="masters">Masters</option>
+            <option value="doctoral">Doctoral</option>
+          </select>
+          <label for="f-field">Field of study</label>
+          <input id="f-field" name="field" type="text">
+        </div>
+        <div>
+          <label for="f-history">Bio / history</label>
+          <textarea id="f-history" name="history"></textarea>
+          <label>Documents on hand</label>
+          <div class="tag-input" data-field="documents" id="tag-documents"><input type="text" placeholder="Add and press Enter&hellip;"></div>
+          <label>Interests</label>
+          <div class="tag-input" data-field="interests" id="tag-interests"><input type="text" placeholder="Add and press Enter&hellip;"></div>
+          <label>Goals</label>
+          <div class="tag-input" data-field="goals" id="tag-goals"><input type="text" placeholder="Add and press Enter&hellip;"></div>
+        </div>
+      </div>
+      <label>Certificates</label>
+      <div class="tag-input" data-field="certificates" id="tag-certificates"><input type="text" placeholder="e.g. BSc Computer Science, University of Zimbabwe (2021)"></div>
+      <label>Work history</label>
+      <div class="tag-input" data-field="work_history" id="tag-work_history"><input type="text" placeholder="e.g. Software Engineer, Acme Corp (2021-2024): built payments infrastructure"></div>
+      <div class="grid2">
+        <div>
+          <label>Preferred countries</label>
+          <div class="tag-input" data-field="preferred_countries" id="tag-preferred_countries"><input type="text" placeholder="Add and press Enter&hellip;"></div>
+        </div>
+        <div>
+          <label>Preferred funding</label>
+          <div class="tag-input" data-field="preferred_funding" id="tag-preferred_funding"><input type="text" placeholder="Add and press Enter&hellip;"></div>
+        </div>
+      </div>
+      <label>Achievements</label>
+      <div class="tag-input" data-field="achievements" id="tag-achievements"><input type="text" placeholder="Add and press Enter&hellip;"></div>
+      <div class="row" style="margin-top:18px;">
+        <button class="btn" id="save-profile-btn" type="submit">Save profile</button>
+        <span class="status-line" id="profile-status"></span>
+      </div>
+    </form>
+  </section>
+
+  <section id="actions-section">
+    <h2>Discovery</h2>
+    <div class="row">
+      <button class="btn" id="discover-btn" type="button">Run discovery</button>
+      <button class="btn ghost small" id="runs-toggle" type="button">View run history</button>
+      <button class="btn ghost small" id="digest-toggle" type="button">View digest</button>
+    </div>
+    <p class="status-line" id="discover-status"></p>
+    <div id="runs-panel"><table id="runs-table"><thead><tr><th>Started</th><th>Queries</th><th>Found</th><th>Added</th><th>Failures</th></tr></thead><tbody></tbody></table></div>
+    <div id="digest-panel"></div>
+  </section>
+
+  <section id="opportunities-section">
+    <h2>Opportunities</h2>
+    <div class="tabs" id="filter-tabs">
+      <button class="tab active" data-filter="all" type="button">All</button>
+      <button class="tab" data-filter="eligible" type="button">Eligible</button>
+      <button class="tab" data-filter="needs_review" type="button">Needs review</button>
+      <button class="tab" data-filter="ineligible" type="button">Ineligible</button>
+      <button class="tab" data-filter="shortlisted" type="button">Shortlisted</button>
+    </div>
+    <div id="opportunities-list"><p class="empty">Loading&hellip;</p></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var state = { profile: null, matches: [], filter: "all", packagesLoaded: {} };
+  var LIST_FIELDS = ["documents", "interests", "goals", "certificates", "work_history", "preferred_countries", "preferred_funding", "achievements"];
+
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function $all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+  function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
+
+  function showError(message) {
+    $("#error-text").textContent = message;
+    $("#error-banner").style.display = "block";
+  }
+  $("#error-dismiss").addEventListener("click", function () { $("#error-banner").style.display = "none"; });
+
+  async function api(path, options) {
+    var response;
+    try {
+      response = await fetch(path, options);
+    } catch (networkError) {
+      throw new Error("Network error reaching " + path + ": " + networkError.message);
+    }
+    if (!response.ok) {
+      var detail = "";
+      try { detail = (await response.json()).detail || ""; } catch (e) { /* body wasn't JSON */ }
+      throw new Error((detail || ("Request to " + path + " failed")) + " (HTTP " + response.status + ")");
+    }
+    if (response.status === 204) return null;
+    return response.json();
+  }
+
+  // ---------- tag inputs ----------
+  function initTagInput(container, initialValues) {
+    (initialValues || []).forEach(function (v) { addChip(container, v); });
+    var input = $("input", container);
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === ",") {
+        e.preventDefault();
+        var value = input.value.trim().replace(/,$/, "");
+        if (value) { addChip(container, value); input.value = ""; }
+      } else if (e.key === "Backspace" && input.value === "") {
+        var chips = $all(".chip", container);
+        if (chips.length) removeChip(chips[chips.length - 1]);
+      }
+    });
+  }
+
+  function addChip(container, value) {
+    var chip = document.createElement("span");
+    chip.className = "chip";
+    chip.textContent = value;
+    var remove = document.createElement("button");
+    remove.type = "button";
+    remove.setAttribute("aria-label", "Remove " + value);
+    remove.textContent = "×";
+    remove.addEventListener("click", function () { removeChip(chip); });
+    chip.appendChild(remove);
+    container.insertBefore(chip, $("input", container));
+  }
+
+  function removeChip(chip) { chip.remove(); }
+
+  function readTags(container) {
+    return $all(".chip", container).map(function (chip) { return chip.firstChild.textContent; });
+  }
+
+  function clearTags(container) { $all(".chip", container).forEach(removeChip); }
+
+  LIST_FIELDS.forEach(function (field) { initTagInput($("#tag-" + field), []); });
+
+  // ---------- profile ----------
+  async function loadProfile() {
+    try {
+      var profile = await api("/profile");
+      state.profile = profile;
+      if (profile) fillProfileForm(profile);
+    } catch (err) {
+      showError("Could not load profile: " + err.message);
+    }
+  }
+
+  function fillProfileForm(profile) {
+    $("#f-name").value = profile.name || "";
+    $("#f-country").value = profile.country || "";
+    $("#f-age").value = profile.age == null ? "" : profile.age;
+    $("#f-study-level").value = profile.study_level || "";
+    $("#f-field").value = profile.field || "";
+    $("#f-history").value = profile.history || "";
+    LIST_FIELDS.forEach(function (field) {
+      var container = $("#tag-" + field);
+      clearTags(container);
+      (profile[field] || []).forEach(function (v) { addChip(container, v); });
+    });
+  }
+
+  function buildProfilePayload() {
+    var payload = {
+      name: $("#f-name").value.trim(),
+      country: $("#f-country").value.trim() || null,
+      age: $("#f-age").value === "" ? null : Number($("#f-age").value),
+      study_level: $("#f-study-level").value || null,
+      field: $("#f-field").value.trim() || null,
+      history: $("#f-history").value.trim() || null
+    };
+    LIST_FIELDS.forEach(function (field) { payload[field] = readTags($("#tag-" + field)); });
+    return payload;
+  }
+
+  $("#profile-form").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var status = $("#profile-status");
+    var btn = $("#save-profile-btn");
+    if (!$("#f-name").value.trim()) {
+      status.textContent = "Name is required.";
+      status.className = "status-line err";
+      return;
+    }
+    btn.disabled = true;
+    status.textContent = "Saving…";
+    status.className = "status-line";
+    try {
+      state.profile = await api("/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildProfilePayload())
+      });
+      status.textContent = "Saved.";
+      status.className = "status-line ok";
+      loadMatches();
+    } catch (err) {
+      status.textContent = err.message;
+      status.className = "status-line err";
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ---------- discovery ----------
+  $("#discover-btn").addEventListener("click", async function () {
+    var btn = $("#discover-btn");
+    var status = $("#discover-status");
+    btn.disabled = true;
+    var startedAt = Date.now();
+    btn.innerHTML = "<span class=\"spinner\"></span>Searching…";
+    var ticker = setInterval(function () {
+      status.textContent = "Fetching and verifying results… (" + Math.round((Date.now() - startedAt) / 1000) + "s)";
+      status.className = "status-line";
+    }, 1000);
+    try {
+      var result = await api("/discover", { method: "POST" });
+      status.textContent = "Found " + result.found + ", added " + result.added + " new.";
+      status.className = "status-line ok";
+      await loadMatches();
+    } catch (err) {
+      status.textContent = err.message;
+      status.className = "status-line err";
+    } finally {
+      clearInterval(ticker);
+      btn.disabled = false;
+      btn.textContent = "Run discovery";
+    }
+  });
+
+  $("#runs-toggle").addEventListener("click", async function () {
+    var panel = $("#runs-panel");
+    var opening = panel.style.display !== "block";
+    panel.style.display = opening ? "block" : "none";
+    if (!opening) return;
+    try {
+      var runs = await api("/runs");
+      var body = $("#runs-table tbody");
+      body.innerHTML = "";
+      if (!runs.length) {
+        body.innerHTML = "<tr><td colspan='5' class='empty'>No discovery runs yet.</td></tr>";
+        return;
+      }
+      runs.forEach(function (run) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = "<td>" + esc((run.started_at || "").replace("T", " ").slice(0, 19)) + "</td>" +
+          "<td>" + run.queries.length + "</td><td>" + run.found + "</td><td>" + run.added + "</td>" +
+          "<td>" + run.failures.length + "</td>";
+        body.appendChild(tr);
+      });
+    } catch (err) {
+      showError("Could not load run history: " + err.message);
+    }
+  });
+
+  $("#digest-toggle").addEventListener("click", async function () {
+    var panel = $("#digest-panel");
+    var opening = panel.style.display !== "block";
+    panel.style.display = opening ? "block" : "none";
+    if (!opening) return;
+    try {
+      var digest = await api("/digest");
+      panel.innerHTML = renderDigest(digest.content);
+    } catch (err) {
+      showError("Could not load digest: " + err.message);
+    }
+  });
+
+  function renderDigest(text) {
+    var lines = esc(text).split("\n");
+    var html = "";
+    lines.forEach(function (line) {
+      if (/^## /.test(line)) { html += "<h3>" + line.replace(/^## /, "") + "</h3>"; return; }
+      var bold = line.replace(/^- \*\*(.*?)\*\*/, "<li><strong>$1</strong>");
+      if (bold !== line) { html += bold + "</li>"; return; }
+      if (line.trim() === "") { html += ""; return; }
+      html += "<div>" + line + "</div>";
+    });
+    return html.replace(/(https?:\/\/[^\s<]+)/g, "<a href=\"$1\" target=\"_blank\" rel=\"noopener\">$1</a>");
+  }
+
+  // ---------- opportunities ----------
+  $all(".tab", $("#filter-tabs")).forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      $all(".tab", $("#filter-tabs")).forEach(function (t) { t.classList.remove("active"); });
+      tab.classList.add("active");
+      state.filter = tab.dataset.filter;
+      renderOpportunities();
+    });
+  });
+
+  async function loadMatches() {
+    try {
+      state.matches = await api("/matches");
+      renderOpportunities();
+    } catch (err) {
+      if (err.message.indexOf("409") !== -1) {
+        $("#opportunities-list").innerHTML = "<p class='empty'>Save a profile above to see matched opportunities.</p>";
+      } else {
+        showError("Could not load opportunities: " + err.message);
+      }
+    }
+  }
+
+  function passesFilter(item) {
+    if (state.filter === "all") return true;
+    if (state.filter === "shortlisted") return item.decision === "shortlisted";
+    return item.match.status === state.filter;
+  }
+
+  function truncate(text, max) {
+    if (!text) return "";
+    var clean = text.length > max ? text.slice(0, max) + "…" : text;
+    return clean;
+  }
+
+  function renderOpportunities() {
+    var list = $("#opportunities-list");
+    var visible = state.matches.filter(function (item) { return item.decision !== "dismissed" || state.filter === "all"; })
+      .filter(passesFilter);
+    if (!state.matches.length) {
+      list.innerHTML = "<p class='empty'>No opportunities yet. Run discovery above.</p>";
+      return;
+    }
+    if (!visible.length) {
+      list.innerHTML = "<p class='empty'>Nothing matches this filter.</p>";
+      return;
+    }
+    list.innerHTML = "";
+    visible.forEach(function (item) { list.appendChild(renderCard(item)); });
+  }
+
+  function renderCard(item) {
+    var opp = item.opportunity;
+    var match = item.match;
+    var card = document.createElement("article");
+    card.className = "opportunity" + (item.decision === "dismissed" ? " dismissed" : "");
+    card.dataset.id = item.id;
+
+    var reasons = match.status === "eligible" ? match.matched_requirements : match.failed_requirements.concat(match.unknown_requirements);
+    var reasonsHtml = reasons.length
+      ? "<p class='reasons" + (match.status === "eligible" ? "" : " blockers") + "'><strong>" +
+        (match.status === "eligible" ? "Matches: " : "Review: ") + esc(reasons.join("; ")) + "</strong></p>"
+      : "";
+
+    var evidenceRaw = (opp.evidence && opp.evidence[0]) || "";
+    var short = truncate(evidenceRaw, 280);
+    var evidenceHtml = evidenceRaw
+      ? "<p class='evidence-preview' data-full='" + esc(evidenceRaw).replace(/'/g, "&#39;") + "' data-short='" +
+        esc(short).replace(/'/g, "&#39;") + "'>" + esc(short) + "</p>" +
+        (evidenceRaw.length > 280 ? "<button type='button' class='evidence-toggle'>Show full evidence</button>" : "")
+      : "<p class='meta'>Evidence pending review.</p>";
+
+    card.innerHTML =
+      "<div class='opp-head'><h3><a href='" + esc(opp.url) + "' target='_blank' rel='noopener'>" + esc(opp.title) + "</a></h3>" +
+      "<span class='badge " + esc(match.status) + "'>" + esc(match.status.replace("_", " ")) + "</span></div>" +
+      "<p class='meta'>" + esc(opp.source) + " &middot; score " + match.score +
+      (item.decision ? "<span class='decision-tag'>" + esc(item.decision) + "</span>" : "") +
+      (item.usefulness ? "<span class='decision-tag'>" + esc(item.usefulness) + "</span>" : "") + "</p>" +
+      "<p class='meta'>Deadline: " + esc(opp.deadline || "Not specified") + "</p>" +
+      reasonsHtml + evidenceHtml +
+      "<div class='opp-actions'>" +
+      "<button type='button' class='btn small package-toggle'>View application package</button>" +
+      "<button type='button' class='btn small ghost feedback-btn' data-decision='shortlisted'>Shortlist</button>" +
+      "<button type='button' class='btn small danger feedback-btn' data-decision='dismissed'>Dismiss</button>" +
+      "<button type='button' class='btn small ghost feedback-btn' data-decision='useful'>Useful</button>" +
+      "<button type='button' class='btn small ghost feedback-btn' data-decision='not_useful'>Not useful</button>" +
+      "</div><div class='package-panel'></div>";
+
+    var evidenceToggle = $(".evidence-toggle", card);
+    if (evidenceToggle) {
+      var expanded = false;
+      evidenceToggle.addEventListener("click", function () {
+        var p = $(".evidence-preview", card);
+        expanded = !expanded;
+        p.textContent = expanded ? p.dataset.full.replace(/&#39;/g, "'") : p.dataset.short.replace(/&#39;/g, "'");
+        evidenceToggle.textContent = expanded ? "Show less" : "Show full evidence";
+      });
+    }
+
+    $(".package-toggle", card).addEventListener("click", function () { togglePackage(item.id, card); });
+    $all(".feedback-btn", card).forEach(function (btn) {
+      btn.addEventListener("click", function () { sendFeedback(item.id, btn.dataset.decision, card); });
+    });
+
+    return card;
+  }
+
+  async function togglePackage(id, card) {
+    var panel = $(".package-panel", card);
+    var opening = panel.style.display !== "block";
+    panel.style.display = opening ? "block" : "none";
+    if (!opening || state.packagesLoaded[id]) return;
+    panel.innerHTML = "Loading…";
+    try {
+      var pkg = await api("/opportunities/" + id + "/package");
+      var checklist = pkg.checklist.map(function (i) { return "<li><strong>" + esc(i.status) + "</strong>: " + esc(i.requirement) + "</li>"; }).join("");
+      var warnings = pkg.warnings.length ? pkg.warnings.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") : "<li>None</li>";
+      panel.innerHTML = "<strong>Checklist</strong><ul>" + checklist + "</ul>" +
+        "<strong>Draft cover note</strong><pre>" + esc(pkg.cover_note) + "</pre>" +
+        "<strong>Warnings</strong><ul>" + warnings + "</ul>";
+      state.packagesLoaded[id] = true;
+    } catch (err) {
+      panel.innerHTML = "<span class='status-line err'>" + esc(err.message) + "</span>";
+    }
+  }
+
+  async function sendFeedback(id, decision, card) {
+    try {
+      var result = await api("/opportunities/" + id + "/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision: decision })
+      });
+      var item = state.matches.filter(function (m) { return m.id === id; })[0];
+      if (item) {
+        if (decision === "shortlisted" || decision === "dismissed") item.decision = result.decision;
+        else item.usefulness = result.usefulness;
+      }
+      renderOpportunities();
+    } catch (err) {
+      showError("Could not record feedback: " + err.message);
+    }
+  }
+
+  loadProfile().then(loadMatches);
+})();
+</script>
+</body>
+</html>
