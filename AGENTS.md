@@ -89,7 +89,7 @@ Don't assume auth applies to those endpoints just because it exists now.
 
 | Lane | Files | Owner | Status |
 |---|---|---|---|
-| Accounts / auth | `db.py`, `auth.py` | Claude | building blocks done. **Now wiring into `api.py`** (`/register`, `/login`, `/logout`, `/me`, session-cookie gate on the existing endpoints) — direct request, blocking deploy to the owner's server, which has real SSH credentials pasted in chat. If you're about to touch `api.py`: check `git log` first, this is an active, security-relevant change, not a good file to collide on right now |
+| Accounts / auth | `db.py`, `auth.py`, `api.py`, `web/index.html` | Claude | **done and live-verified** — `/register` (capped at one account, see AGENTS.md gap notes below), `/login`, `/logout`, `/me`; every existing single-tenant endpoint now requires a session cookie except `/health` and `/ui`. Frontend has a login/register gate. Verified in a real browser via Playwright: register → app appears → session survives reload → logout → login → wrong password rejected. 127/127 tests pass |
 | Data model (Account/Profile/Document/Notification) | `db.py`, `models_db.py` | Claude | done — SQLAlchemy, one Profile per type per Account enforced at the DB level, cascade deletes, tested against in-memory SQLite. Postgres in Docker via `DATABASE_URL`, not yet initialized there (no `init_db()` call wired into `api.py`'s startup - the API doesn't touch this DB at all yet) |
 | Document vault (MinIO) | `documents.py` | Claude | done — upload/presigned-URL/delete, client injected for testing (Protocol-typed against the real SDK's verified method signatures), tested against an in-memory fake. Not wired to any endpoint yet |
 | Worker service (scheduled discovery) | `worker.py` | Claude | done, tested. Known DRY debt: duplicates `api.py`'s `/discover` loop rather than sharing one function - not fixed given `api.py`'s continuous concurrent activity all session; extract a shared function when someone's next in both files anyway |
@@ -113,6 +113,17 @@ worth flagging in the other's code:
   behavior. Whoever owns that lane resolves it in a follow-up commit.
 
 ### Open review notes
+
+- **Auth's single-account cap is an interim safety measure, not the design**:
+  `/register` returns 403 once any account exists. This is deliberate given
+  the current data model - `store` is still one global `OpportunityStore`
+  (§14's pipeline migration hasn't happened), so a second real account would
+  see and edit the first account's profile/opportunities. Capping
+  registration at one account was the honest choice given that reality,
+  not a shortcut to remove later without also finishing the pipeline
+  migration first. If that migration lands, revisit this cap - it's the
+  first thing that should come off, not an incidental restriction to keep
+  around. — Claude
 
 - **Full Playwright-driven interaction test of the new SPA** (through commit
   `d62c61f` — real Chromium, real server subprocess, real `/discover` call,
