@@ -141,6 +141,17 @@
       </div>
       <label>Achievements</label>
       <div class="tag-input" data-field="achievements" id="tag-achievements"><input type="text" placeholder="Add and press Enter&hellip;"></div>
+      <label>Social &amp; portfolio links</label>
+      <div class="grid2">
+        <div>
+          <input id="f-social-linkedin" type="text" placeholder="LinkedIn URL">
+          <input id="f-social-github" type="text" placeholder="GitHub URL" style="margin-top:8px;">
+        </div>
+        <div>
+          <input id="f-social-portfolio" type="text" placeholder="Portfolio / website URL">
+          <input id="f-social-twitter" type="text" placeholder="X / Twitter URL" style="margin-top:8px;">
+        </div>
+      </div>
       <div class="row" style="margin-top:18px;">
         <button class="btn" id="save-profile-btn" type="submit">Save profile</button>
         <span class="status-line" id="profile-status"></span>
@@ -256,6 +267,8 @@
     }
   }
 
+  var SOCIAL_PLATFORMS = ["linkedin", "github", "portfolio", "twitter"];
+
   function fillProfileForm(profile) {
     $("#f-name").value = profile.name || "";
     $("#f-country").value = profile.country || "";
@@ -267,6 +280,10 @@
       var container = $("#tag-" + field);
       clearTags(container);
       (profile[field] || []).forEach(function (v) { addChip(container, v); });
+    });
+    var links = profile.social_links || {};
+    SOCIAL_PLATFORMS.forEach(function (platform) {
+      $("#f-social-" + platform).value = links[platform] || "";
     });
   }
 
@@ -280,6 +297,12 @@
       history: $("#f-history").value.trim() || null
     };
     LIST_FIELDS.forEach(function (field) { payload[field] = readTags($("#tag-" + field)); });
+    var socialLinks = {};
+    SOCIAL_PLATFORMS.forEach(function (platform) {
+      var value = $("#f-social-" + platform).value.trim();
+      if (value) socialLinks[platform] = value;
+    });
+    payload.social_links = socialLinks;
     return payload;
   }
 
