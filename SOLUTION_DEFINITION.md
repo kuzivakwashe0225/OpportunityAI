@@ -306,3 +306,37 @@ Deferred — needed before Phase 3/4, not before MVP:
 The strongest implementation is a **human-governed opportunity operating system** assembled from proven open-source components. Its defensible value is not a generic browser agent. It is the verified profile, evidence-linked matching, document and deadline controls, connector-specific reliability, approval policy, and complete audit trail. Build those foundations before attempting broad autonomous applications or model fine-tuning.
 
 Ship that value narrowly first: the scholarship-only, no-browser-automation MVP in §10 proves the profile, matching, and drafting foundations against real deadlines within weeks, using only tools that carry no platform or legal exposure. Everything riskier — submission automation, job boards, and Zimbabwe tenders — is a deliberate, later addition on top of a loop that has already earned trust, not a parallel build.
+
+## 14. Accounts, multi-profile documents, and containerization (Phase 2)
+
+Direct request, decided 3 September: multi-tenant accounts (email sign-in, separate logins for different people — not just a personal access gate), an uploaded-document vault backed by MinIO, and three curated profile types per account (scholarship / job / grant) the owner can create any subset of and customize independently. Document *extraction* (pulling work history out of an uploaded CV automatically) is explicitly deferred to an open-source LLM (Ollama, evaluate at that time) — build the upload/storage pipeline now without it.
+
+This is a real architectural fork from the MVP, not an addition to it: the MVP's `store.py` holds exactly one global profile and one global opportunity list, no user concept at all. Multi-tenancy means every one of those needs owner scoping. To avoid breaking the MVP loop that's already live-verified and in use, this phase is built as new, independently-tested infrastructure first (accounts, data model, document storage), with **migrating `/discover`, `/matches`, `/digest`, and `/ui` to be account-scoped as an explicit, separate, later step** — not bundled into the same change as introducing auth.
+
+### Data model
+
+Moving off the single JSON file to PostgreSQL — multi-tenant relational data (accounts owning several profiles, each profile owning several documents) is what relational structure is for, and it's also what makes the Docker/microservices split in §14.4 coherent (a database is a natural separate container; a JSON file on a volume is not).
+
+- **Account**: id, email (unique), password hash, created_at. Password auth, not magic-link — avoids a second new external dependency (SMTP) on top of the document/auth work; email-based notifications (§14.3) are a separate later decision once a provider is chosen.
+- **Profile**: id, account_id, profile_type (`scholarship` | `job` | `grant`), display_name, and the existing `PersonalProfile` fields (name, country, age, study_level, field, documents, interests, goals, history, achievements, preferred_countries, preferred_funding, certificates, work_history) plus a picture URL. An account can hold zero to three Profiles, one per type, freely switchable — not one record with type-tagged field overrides, since the owner's framing was explicit that each type gets its *own* fully separate data, sharing only account-level identity (email, picture).
+- **Document**: id, profile_id, MinIO object key, original filename, content type, size, uploaded_at, extraction_status (`pending` | `extracted` | `skipped` — `skipped` is the only reachable state until Ollama extraction lands). A CV uploaded under the Job profile and one uploaded under the Scholarship profile are distinct Documents even if the same file, because they belong to different Profiles — matches "documents per profile."
+- **Notification**: id, account_id, kind, message, read_at, created_at. In-app first (surfaced in the existing review UI as a notification list/bell) — no new external dependency required today; email as a channel is a fast-follow once a provider is chosen, same shape of decision as Tavily was for search.
+
+### Document vault (MinIO)
+
+Self-hosted, S3-compatible, runs as its own container (§14.4) — the right fit for "the system scrapes the documents and takes relevant data... stores the documents per profile... retrieves and sends them when applying." Upload flow: owner attaches a file under a specific Profile → validated (type/size) → written to MinIO under a key namespaced by account/profile/document id → metadata row created. Retrieval for an application package (§5, drafting.py) reads the Document rows for the active Profile and generates short-lived presigned URLs rather than exposing MinIO directly or proxying full file bytes through the API.
+
+### Profile onboarding flow
+
+Sign in (or register) → redirect to profile setup → owner picks which of the three profile types to create (at least one) → per profile: fill fields, upload documents, review what came back once extraction exists, correct or explicitly suppress any field the system filled in that they don't want disclosed (a `visible: bool` per sensitive field is simpler to reason about than deleting the underlying value — the fact stays for matching, the disclosure choice stays separate, consistent with §5.3's "never invent, never silently drop a known fact"). Owner can add/edit/switch between profiles at any time after onboarding, not just once.
+
+### Docker / microservices
+
+`docker-compose.yml` with four services: `api` (this FastAPI app), `worker` (same codebase, different entrypoint — runs scheduled discovery and, later, document extraction jobs, so a slow `/discover` call doesn't block the request-handling process), `db` (Postgres), `minio` (object storage + its console). No message queue (Celery/Redis) in this pass — that's real added complexity or a genuine next step once `worker` needs to run more than a scheduled job; noted here so it isn't silently assumed to already exist.
+
+### What this explicitly does not do yet
+
+- Does not migrate the existing scholarship discovery/matching/digest endpoints to be account-scoped — they remain the single-tenant MVP flow until that migration is deliberately scoped and built.
+- Does not implement document extraction (needs the Ollama evaluation the owner asked to defer).
+- Does not implement email notifications (needs a provider decision, deferred like Tavily was).
+- Does not implement a task queue for `worker` — a scheduled/cron job runner is sufficient for what's actually being built now.
