@@ -67,14 +67,14 @@ it's kept current.
 | Matching engine | `matching.py` | Codex | active |
 | Ingestion / dedup | `ingestion.py` | Codex | merge logic done; real fetching not started |
 | Workflow API + persistence | `api.py`, `store.py` | Codex | done for MVP scope, atomic persistence included |
-| Digest / review workspace | `digest.py`, `api.py`, `tests/test_ui.py` | Codex/Claude | server-rendered inbox, package review, and feedback UI done |
+| Digest / review workspace | `digest.py` | Claude | done for MVP scope |
 | Source registry (fixed portals) | `sources.py` | Codex | registry primitive done, not populated yet |
 | Search client | `search.py` | Claude | done — Tavily, tested with mocked HTTP |
 | Discovery (profile → search) | `discovery.py`, `search.py` | Codex/Claude | Tavily-backed profile discovery done; bounded and URL-deduplicated |
 | Extraction (search result → Opportunity draft) | `extraction.py` | Codex | conservative parser done; verified-content gate protects hard requirements |
 | Drafting / package builder | `drafting.py` | Claude | done — checklist + cover-note draft, no LLM call, nothing unfounded in the output |
 | Test isolation | `tests/conftest.py` | Claude | done — module store singleton was defaulting to real `.data/store.json` in tests, fixed |
-| Review UI | `api.py` (`/ui`, `/ui/opportunities/{id}/feedback`) | Codex | in progress as of this row — server-rendered HTML, no JS, form-based feedback with a 303 redirect. Don't build a competing UI; if extending it, extend this one |
+| Review UI | `src/opportunity_agent/web/index.html`, `api.py` (`GET /ui`, `GET /profile`) | Claude | **redesigned** (commit `870eaaa`) — direct request for a real interactive frontend, not incremental polish on the server-rendered version. Now a single-page app: vanilla JS, no build step, no new dependency, talks to the existing JSON API via `fetch()`. The two server-rendered-only routes (`POST /ui/opportunities/{id}/feedback`, `GET /ui/opportunities/{id}/package`) are gone — the SPA calls the plain JSON endpoints directly. `GET /profile` is new (previously write-only). If you were mid-work on the server-rendered version: it's superseded, not broken by accident — see the commit message. Extend `web/index.html`, don't resurrect the old inline-HTML approach in `api.py`. |
 
 The drafting package is now available through both a JSON API endpoint and a
 server-rendered review page. Submission remains intentionally absent.
