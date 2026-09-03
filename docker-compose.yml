@@ -1,5 +1,6 @@
 services:
   api:
+    restart: unless-stopped
     build: .
     command: python -m uvicorn opportunity_agent.api:app --host 0.0.0.0 --port 8000
     ports:
@@ -21,6 +22,7 @@ services:
         condition: service_started
 
   worker:
+    restart: unless-stopped
     build: .
     command: python -m opportunity_agent.worker
     environment:
@@ -35,6 +37,7 @@ services:
         condition: service_healthy
 
   db:
+    restart: unless-stopped
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: opportunity
@@ -55,6 +58,7 @@ services:
   # start order) should be handled with connection retry in documents.py,
   # which doesn't exist yet - real gap, not silently assumed solved.
   minio:
+    restart: unless-stopped
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
