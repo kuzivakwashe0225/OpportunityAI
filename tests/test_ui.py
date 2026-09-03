@@ -10,56 +10,43 @@ def setup_function():
     store.reset()
 
 
-def test_review_ui_shows_empty_state():
+def test_interactive_ui_is_reachable_and_contains_controls():
     response = client.get("/ui")
 
     assert response.status_code == 200
     assert "Scholarship Scout" in response.text
-    assert "No profile yet" in response.text
+    assert "profile-form" in response.text
+    assert "discover-btn" in response.text
+    assert "filter-tabs" in response.text
+    assert "package-toggle" in response.text
 
 
-def test_review_ui_shows_match_and_package_link():
-    client.put("/profile", json={
-        "name": "Test Applicant",
-        "country": "Zimbabwe",
-        "study_level": "masters",
-        "field": "Computer Science",
-        "documents": ["cv"],
+def test_profile_read_endpoint_supports_frontend_bootstrap():
+    assert client.get("/profile").json() is None
+    client.put("/profile", json={"name": "Test Applicant", "goals": ["study climate technology"]})
+
+    response = client.get("/profile")
+
+    assert response.status_code == 200
+    assert response.json()["goals"] == ["study climate technology"]
+
+
+def test_interactive_ui_loads_opportunities_through_api():
+    client.put("/profile", json={"name": "Test Applicant", "country": "Zimbabwe"})
+    client.post("/opportunities", json={
+        "source": "Example Foundation",
+        "title": "STEM Award",
+        "url": "https://example.org/award",
+        "evidence": ["official page"],
     })
-    opportunity = client.post("/opportunities", json={
-        "source": "Example Foundation",
-        "title": "STEM Award",
-        "url": "https://example.org/award",
-        "evidence": ["official page"],
-        "requirements_verified": True,
-    }).json()
 
-    response = client.get("/ui")
+    response = client.get("/matches")
 
     assert response.status_code == 200
-    assert "STEM Award" in response.text
-    assert f"/ui/opportunities/{opportunity['id']}/package" in response.text
-    assert "needs_review" in response.text
+    assert response.json()[0]["opportunity"]["title"] == "STEM Award"
 
 
-def test_review_ui_renders_application_package():
-    client.put("/profile", json={"name": "Test Applicant"})
-    opportunity = client.post("/opportunities", json={
-        "source": "Example Foundation",
-        "title": "STEM Award",
-        "url": "https://example.org/award",
-        "evidence": ["official page"],
-    }).json()
-
-    response = client.get(f"/ui/opportunities/{opportunity['id']}/package")
-
-    assert response.status_code == 200
-    assert "Application package" in response.text
-    assert "Dear Selection Committee" in response.text
-    assert "https://example.org/award" in response.text
-
-
-def test_review_ui_can_dismiss_opportunity():
+def test_feedback_actions_update_api_state():
     client.put("/profile", json={"name": "Test Applicant"})
     opportunity = client.post("/opportunities", json={
         "source": "Example Foundation",
@@ -69,10 +56,9 @@ def test_review_ui_can_dismiss_opportunity():
     }).json()
 
     response = client.post(
-        f"/ui/opportunities/{opportunity['id']}/feedback",
-        data={"decision": "dismissed"},
-        follow_redirects=False,
+        f"/opportunities/{opportunity['id']}/feedback",
+        json={"decision": "shortlisted"},
     )
 
-    assert response.status_code == 303
-    assert "STEM Award" not in client.get("/ui").text
+    assert response.status_code == 200
+    assert response.json()["decision"] == "shortlisted"
