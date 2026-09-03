@@ -94,11 +94,11 @@
 
   <section id="profile-section">
     <h2>Your profile</h2>
-    <form id="profile-form">
+    <form id="profile-form" novalidate>
       <div class="grid2">
         <div>
           <label for="f-name">Name</label>
-          <input id="f-name" name="name" type="text" required>
+          <input id="f-name" name="name" type="text">
           <label for="f-country">Country</label>
           <input id="f-country" name="country" type="text">
           <label for="f-age">Age</label>
@@ -325,10 +325,12 @@
     }, 1000);
     try {
       var result = await api("/discover", { method: "POST" });
-      status.textContent = "Found " + result.found + ", added " + result.added + " new.";
-      status.className = "status-line ok";
+      clearInterval(ticker); // before setting the final message - the ticker would otherwise
+      status.textContent = "Found " + result.found + ", added " + result.added + " new."; // race the
+      status.className = "status-line ok";                                                // await below
       await loadMatches();
     } catch (err) {
+      clearInterval(ticker);
       status.textContent = err.message;
       status.className = "status-line err";
     } finally {
