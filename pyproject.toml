@@ -1,7 +1,7 @@
 [project]
 name = "opportunity-agent"
 version = "0.1.0"
-description = "Scholarship discovery and matching MVP"
+description = "OpportunityAI - scholarship, job, and grant discovery and application assistant"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115,<1",

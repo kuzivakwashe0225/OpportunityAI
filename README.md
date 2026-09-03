@@ -1,6 +1,6 @@
-# Opportunity Agent
+# OpportunityAI
 
-Scholarship Scout is the first MVP slice of Opportunity Agent. It discovers scholarship opportunities from a real search API using your own profile (no hand-picked source list), checks them against an evidence-backed eligibility model, and prepares a digest. It does not log in, upload, pay, send, or submit anything — see `SOLUTION_DEFINITION.md` for the full problem definition, architecture, and phased plan, and `AGENTS.md` for who's built what and what's still open.
+The scholarship-discovery flow at `/ui` is the first working slice of OpportunityAI. It discovers opportunities from a real search API using your own profile (no hand-picked source list), checks them against an evidence-backed eligibility model, and prepares a digest. It does not log in, upload, pay, send, or submit anything on that flow yet — see `SOLUTION_DEFINITION.md` for the full problem definition, architecture, and phased plan, and `AGENTS.md` for who's built what and what's still open. (The Python package itself stays `opportunity_agent` — an internal name, not user-facing, not worth the churn of renaming everywhere it's imported.)
 
 ## Setup
 

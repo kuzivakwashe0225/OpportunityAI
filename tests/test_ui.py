@@ -14,7 +14,7 @@ def test_interactive_ui_is_reachable_and_contains_controls():
     response = client.get("/ui")
 
     assert response.status_code == 200
-    assert "Scholarship Scout" in response.text
+    assert "OpportunityAI" in response.text
     assert "profile-form" in response.text
     assert "discover-btn" in response.text
     assert "filter-tabs" in response.text

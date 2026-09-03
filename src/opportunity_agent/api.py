@@ -19,7 +19,7 @@ from .matching import match_opportunity
 from .models import Opportunity, PersonalProfile
 from .store import OpportunityStore
 
-app = FastAPI(title="Opportunity Agent")
+app = FastAPI(title="OpportunityAI")
 store = OpportunityStore(path=os.getenv("OPPORTUNITY_AGENT_STORE_PATH", ".data/store.json"))
 _UI_PAGE = (Path(__file__).parent / "web" / "index.html").read_text(encoding="utf-8")
 

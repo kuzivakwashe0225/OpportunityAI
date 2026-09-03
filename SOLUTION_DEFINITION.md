@@ -1,4 +1,6 @@
-# Opportunity Agent: Solution Definition
+# OpportunityAI: Solution Definition
+
+Named OpportunityAI as of 3 September; the Python package stays `opportunity_agent` (internal, not user-facing — not worth the rename churn across every import in the codebase). Earlier commits and working names ("Opportunity Agent," "Scholarship Scout") refer to the same project.
 
 ## 1. Executive summary
 
