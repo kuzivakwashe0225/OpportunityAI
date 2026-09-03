@@ -7,3 +7,5 @@ __pycache__/
 *.db
 .claude/
 .data/
+build/
+*.whl

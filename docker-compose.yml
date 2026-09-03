@@ -1,0 +1,72 @@
+services:
+  api:
+    build: .
+    command: python -m uvicorn opportunity_agent.api:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://opportunity:opportunity@db:5432/opportunity_agent
+      OPPORTUNITY_AGENT_STORE_PATH: /data/store.json
+      TAVILY_API_KEY: ${TAVILY_API_KEY:?set TAVILY_API_KEY in .env}
+      SESSION_SECRET_KEY: "${SESSION_SECRET_KEY:?set SESSION_SECRET_KEY in .env, e.g. via python -c 'import secrets, sys; sys.stdout.write(secrets.token_hex(32))'}"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-opportunity}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-opportunity-secret}
+    volumes:
+      - opportunity-data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
+  worker:
+    build: .
+    command: python -m opportunity_agent.worker
+    environment:
+      DATABASE_URL: postgresql+psycopg://opportunity:opportunity@db:5432/opportunity_agent
+      OPPORTUNITY_AGENT_STORE_PATH: /data/store.json
+      TAVILY_API_KEY: ${TAVILY_API_KEY:?set TAVILY_API_KEY in .env}
+      DISCOVERY_INTERVAL_SECONDS: ${DISCOVERY_INTERVAL_SECONDS:-3600}
+    volumes:
+      - opportunity-data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: opportunity
+      POSTGRES_PASSWORD: opportunity
+      POSTGRES_DB: opportunity_agent
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opportunity"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # No compose-level healthcheck here on purpose: the official minio/minio
+  # image's available tooling for one varies by version and wasn't verified
+  # against a running container in this pass. api/worker connecting to MinIO
+  # before it's fully ready (rare in practice - `depends_on` still enforces
+  # start order) should be handled with connection retry in documents.py,
+  # which doesn't exist yet - real gap, not silently assumed solved.
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-opportunity}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-opportunity-secret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+volumes:
+  opportunity-data:
+  postgres-data:
+  minio-data:

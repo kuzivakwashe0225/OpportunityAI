@@ -21,6 +21,14 @@ test = [
     "pytest>=8.3,<9",
 ]
 
+[tool.setuptools.package-data]
+# api.py reads web/index.html at import time (Path(__file__).parent / "web").
+# Non-Python files aren't included in a build by default - only caught because
+# the Docker image build does a real, non-editable `pip install .`; local dev
+# has been using `pip install -e .` (editable), which points straight at the
+# source tree and never exercises the packaging step this depends on.
+opportunity_agent = ["web/*.html"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
