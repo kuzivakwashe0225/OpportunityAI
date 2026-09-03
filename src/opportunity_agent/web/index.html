@@ -177,7 +177,7 @@
 (function () {
   "use strict";
 
-  var state = { profile: null, matches: [], filter: "all", packagesLoaded: {} };
+  var state = { profile: null, matches: [], filter: "all", packageHtml: {}, openPackages: {} };
   var LIST_FIELDS = ["documents", "interests", "goals", "certificates", "work_history", "preferred_countries", "preferred_funding", "achievements"];
 
   function $(sel, root) { return (root || document).querySelector(sel); }
@@ -477,6 +477,16 @@
       "<button type='button' class='btn small ghost feedback-btn' data-decision='not_useful'>Not useful</button>" +
       "</div><div class='package-panel'></div>";
 
+    // Re-renders happen on every feedback click (renderOpportunities rebuilds
+    // all cards from state.matches) - restore this card's package panel to
+    // whatever state it was in before the rebuild, instead of always
+    // starting collapsed.
+    if (state.openPackages[item.id]) {
+      var restoredPanel = $(".package-panel", card);
+      restoredPanel.style.display = "block";
+      restoredPanel.innerHTML = state.packageHtml[item.id] || "Loading…";
+    }
+
     var evidenceToggle = $(".evidence-toggle", card);
     if (evidenceToggle) {
       var expanded = false;
@@ -500,16 +510,18 @@
     var panel = $(".package-panel", card);
     var opening = panel.style.display !== "block";
     panel.style.display = opening ? "block" : "none";
-    if (!opening || state.packagesLoaded[id]) return;
+    state.openPackages[id] = opening;
+    if (!opening || state.packageHtml[id]) return;
     panel.innerHTML = "Loading…";
     try {
       var pkg = await api("/opportunities/" + id + "/package");
       var checklist = pkg.checklist.map(function (i) { return "<li><strong>" + esc(i.status) + "</strong>: " + esc(i.requirement) + "</li>"; }).join("");
       var warnings = pkg.warnings.length ? pkg.warnings.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") : "<li>None</li>";
-      panel.innerHTML = "<strong>Checklist</strong><ul>" + checklist + "</ul>" +
+      var html = "<strong>Checklist</strong><ul>" + checklist + "</ul>" +
         "<strong>Draft cover note</strong><pre>" + esc(pkg.cover_note) + "</pre>" +
         "<strong>Warnings</strong><ul>" + warnings + "</ul>";
-      state.packagesLoaded[id] = true;
+      panel.innerHTML = html;
+      state.packageHtml[id] = html;
     } catch (err) {
       panel.innerHTML = "<span class='status-line err'>" + esc(err.message) + "</span>";
     }
