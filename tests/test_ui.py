@@ -8,6 +8,8 @@ client = TestClient(app)
 
 def setup_function():
     store.reset()
+    client.cookies.clear()
+    client.post("/register", json={"email": "owner@example.com", "password": "correct horse battery staple"})
 
 
 def test_interactive_ui_is_reachable_and_contains_controls():

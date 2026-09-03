@@ -28,8 +28,12 @@ def make_engine(url: str | None = None) -> Engine:
     return create_engine(resolved, connect_args=connect_args)
 
 
+def make_sessionmaker(bind_engine: Engine) -> sessionmaker:
+    return sessionmaker(bind=bind_engine, expire_on_commit=False)
+
+
 engine = make_engine()
-SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+SessionLocal = make_sessionmaker(engine)
 
 
 def init_db(bind_engine: Engine | None = None) -> None:

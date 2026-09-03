@@ -12,6 +12,8 @@ client = TestClient(app)
 
 def setup_function():
     store.reset()
+    client.cookies.clear()
+    client.post("/register", json={"email": "owner@example.com", "password": "correct horse battery staple"})
 
 
 def profile_payload():

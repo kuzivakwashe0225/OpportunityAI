@@ -87,12 +87,45 @@
 </head>
 <body>
 <main>
-  <h1>OpportunityAI</h1>
-  <p class="intro">A quiet inbox for opportunities worth your attention.</p>
+  <div class="row" style="justify-content:space-between;align-items:baseline;">
+    <div>
+      <h1>OpportunityAI</h1>
+      <p class="intro">A quiet inbox for opportunities worth your attention.</p>
+    </div>
+    <button class="btn ghost small" id="logout-btn" type="button" hidden>Log out</button>
+  </div>
 
   <div id="error-banner"><button id="error-dismiss" type="button" aria-label="Dismiss">&times;</button><span id="error-text"></span></div>
 
-  <section id="profile-section">
+  <section id="auth-section" hidden>
+    <h2 id="auth-heading">Log in</h2>
+    <form id="login-form">
+      <label for="login-email">Email</label>
+      <input id="login-email" type="text" autocomplete="username" required>
+      <label for="login-password">Password</label>
+      <input id="login-password" type="password" autocomplete="current-password" required>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn" type="submit">Log in</button>
+        <span class="status-line" id="login-status"></span>
+      </div>
+    </form>
+    <p class="meta" style="margin-top:18px;" id="register-toggle-row">
+      No account yet? <button class="evidence-toggle" id="show-register-btn" type="button">Register</button>
+    </p>
+    <form id="register-form" hidden>
+      <label for="register-email">Email</label>
+      <input id="register-email" type="text" autocomplete="username" required>
+      <label for="register-password">Password</label>
+      <input id="register-password" type="password" autocomplete="new-password" required>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn" type="submit">Register</button>
+        <button class="btn ghost" id="show-login-btn" type="button">Back to log in</button>
+        <span class="status-line" id="register-status"></span>
+      </div>
+    </form>
+  </section>
+
+  <section id="profile-section" hidden>
     <h2>Your profile</h2>
     <form id="profile-form" novalidate>
       <div class="grid2">
@@ -159,7 +192,7 @@
     </form>
   </section>
 
-  <section id="actions-section">
+  <section id="actions-section" hidden>
     <h2>Discovery</h2>
     <div class="row">
       <button class="btn" id="discover-btn" type="button">Run discovery</button>
@@ -171,7 +204,7 @@
     <div id="digest-panel"></div>
   </section>
 
-  <section id="opportunities-section">
+  <section id="opportunities-section" hidden>
     <h2>Opportunities</h2>
     <div class="tabs" id="filter-tabs">
       <button class="tab active" data-filter="all" type="button">All</button>
@@ -570,7 +603,101 @@
     }
   }
 
-  loadProfile().then(loadMatches);
+  // ---------- auth gate ----------
+  function showApp() {
+    $("#auth-section").hidden = true;
+    $("#profile-section").hidden = false;
+    $("#actions-section").hidden = false;
+    $("#opportunities-section").hidden = false;
+    $("#logout-btn").hidden = false;
+    loadProfile().then(loadMatches);
+  }
+
+  function showAuth() {
+    $("#auth-section").hidden = false;
+    $("#profile-section").hidden = true;
+    $("#actions-section").hidden = true;
+    $("#opportunities-section").hidden = true;
+    $("#logout-btn").hidden = true;
+  }
+
+  async function checkAuth() {
+    try {
+      await api("/me");
+      showApp();
+    } catch (err) {
+      showAuth();
+    }
+  }
+
+  $("#login-form").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var status = $("#login-status");
+    status.textContent = "Logging in…";
+    status.className = "status-line";
+    try {
+      await api("/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: $("#login-email").value.trim(),
+          password: $("#login-password").value
+        })
+      });
+      status.textContent = "";
+      showApp();
+    } catch (err) {
+      status.textContent = err.message;
+      status.className = "status-line err";
+    }
+  });
+
+  $("#register-form").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var status = $("#register-status");
+    status.textContent = "Registering…";
+    status.className = "status-line";
+    try {
+      await api("/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: $("#register-email").value.trim(),
+          password: $("#register-password").value
+        })
+      });
+      status.textContent = "";
+      showApp();
+    } catch (err) {
+      status.textContent = err.message;
+      status.className = "status-line err";
+    }
+  });
+
+  $("#show-register-btn").addEventListener("click", function () {
+    $("#login-form").hidden = true;
+    $("#register-toggle-row").hidden = true;
+    $("#register-form").hidden = false;
+    $("#auth-heading").textContent = "Register";
+  });
+
+  $("#show-login-btn").addEventListener("click", function () {
+    $("#register-form").hidden = true;
+    $("#login-form").hidden = false;
+    $("#register-toggle-row").hidden = false;
+    $("#auth-heading").textContent = "Log in";
+  });
+
+  $("#logout-btn").addEventListener("click", async function () {
+    try {
+      await api("/logout", { method: "POST" });
+    } catch (err) {
+      // ignore - we're logging out regardless
+    }
+    showAuth();
+  });
+
+  checkAuth();
 })();
 </script>
 </body>
