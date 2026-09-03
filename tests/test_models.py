@@ -19,3 +19,22 @@ def test_certificates_and_work_history_default_to_empty():
 
     assert profile.certificates == []
     assert profile.work_history == []
+
+
+def test_profile_carries_social_links_by_platform():
+    profile = PersonalProfile(
+        name="Test Applicant",
+        social_links={
+            "linkedin": "https://www.linkedin.com/in/testapplicant",
+            "github": "https://github.com/testapplicant",
+        },
+    )
+
+    assert profile.social_links["linkedin"] == "https://www.linkedin.com/in/testapplicant"
+    assert profile.social_links["github"] == "https://github.com/testapplicant"
+
+
+def test_social_links_default_to_empty():
+    profile = PersonalProfile(name="Test Applicant")
+
+    assert profile.social_links == {}

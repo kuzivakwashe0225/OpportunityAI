@@ -19,6 +19,7 @@ class PersonalProfile(BaseModel):
     preferred_funding: list[str] = Field(default_factory=list)
     certificates: list[str] = Field(default_factory=list)
     work_history: list[str] = Field(default_factory=list)
+    social_links: dict[str, str] = Field(default_factory=dict)
 
 
 class Opportunity(BaseModel):
