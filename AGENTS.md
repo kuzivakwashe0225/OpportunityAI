@@ -19,6 +19,27 @@ The product spec, architecture, and phased plan live in `SOLUTION_DEFINITION.md`
 Read that before making any scope decision — this file is only about *how we two
 agents divide and hand off work*, not what the product is.
 
+## Live deployment
+
+Running at **http://161.97.176.218:8000/ui** as of 3 September — `docker compose`
+on the owner's own server (`~/apps/OpportunityAI`, GitHub remote
+`kuzivakwashe0225/OpportunityAI`), alongside several other unrelated live
+projects on that box (do not assume it's a dedicated machine). Ports 80/443
+are already taken by an existing reverse proxy serving those other projects -
+deliberately not touched; this deploys on port 8000 directly rather than
+routing through it. Postgres and MinIO are not published to the host except
+MinIO's own ports (9000/9001, needed for presigned URLs to work from outside
+the Docker network) - Postgres stays internal-only.
+
+To ship a change to production: push to `master`, then on the server
+`cd ~/apps/OpportunityAI && git pull && docker compose up -d --build`.
+Registration is capped at one account (see the auth review note below) - it
+may already be claimed by the owner; don't consume it testing.
+
+Also worth knowing: **Ollama is already running on that server** (port 11434,
+found while checking for port conflicts) - relevant whenever the deferred
+document-extraction work (SOLUTION_DEFINITION.md §14) actually starts.
+
 ## Current status
 
 MVP vertical: scholarships only, read-only, no browser automation, no submission
