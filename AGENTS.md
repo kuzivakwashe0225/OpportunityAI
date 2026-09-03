@@ -89,13 +89,14 @@ Don't assume auth applies to those endpoints just because it exists now.
 
 | Lane | Files | Owner | Status |
 |---|---|---|---|
-| Accounts / auth | `db.py` or similar, `auth.py` | Claude | starting now — password hashing + session, Postgres-backed |
-| Data model (Account/Profile/Document/Notification) | same | Claude | starting now — SQLAlchemy, tested against SQLite in-suite, Postgres in Docker |
-| Document vault (MinIO) | `documents.py` | Claude | starting now — upload/presigned-URL, client injected for testing like `search.py` was |
-| Docker Compose (api/worker/db/minio) | `docker-compose.yml`, `Dockerfile` | Claude | starting now |
-| Notifications engine (in-app first) | not started | open | needs the Notification table above to exist first |
-| Multi-stage profile onboarding UI | not started | open | needs accounts + Profile model to exist first; extend `web/index.html`'s patterns, don't restart from scratch |
-| Migrate discovery/matching pipeline to be account-scoped | not started | open, deliberately deferred | do not start this until Accounts/Data model above are committed and stable — it touches `api.py`/`store.py` broadly and will conflict with anything else happening there |
+| Accounts / auth | `db.py`, `auth.py` | Claude | done — bcrypt password hashing, JWT sessions (`SESSION_SECRET_KEY` required, no insecure default), tested. Not wired to any endpoint yet - no `/register`/`/login` route exists, just the tested building blocks |
+| Data model (Account/Profile/Document/Notification) | `db.py`, `models_db.py` | Claude | done — SQLAlchemy, one Profile per type per Account enforced at the DB level, cascade deletes, tested against in-memory SQLite. Postgres in Docker via `DATABASE_URL`, not yet initialized there (no `init_db()` call wired into `api.py`'s startup - the API doesn't touch this DB at all yet) |
+| Document vault (MinIO) | `documents.py` | Claude | done — upload/presigned-URL/delete, client injected for testing (Protocol-typed against the real SDK's verified method signatures), tested against an in-memory fake. Not wired to any endpoint yet |
+| Worker service (scheduled discovery) | `worker.py` | Claude | done, tested. Known DRY debt: duplicates `api.py`'s `/discover` loop rather than sharing one function - not fixed given `api.py`'s continuous concurrent activity all session; extract a shared function when someone's next in both files anyway |
+| Docker Compose (api/worker/db/minio) | `docker-compose.yml`, `Dockerfile`, `.dockerignore` | Claude | done and **actually verified end-to-end** - built the real image, started all four containers, hit `/health`, `/ui`, `/profile` and MinIO's health/console endpoints through the running containers. Caught and fixed a real bug this way: `web/index.html` wasn't included in a non-editable `pip install .` (local dev used `-e .` all session, which masked it completely) - see `[tool.setuptools.package-data]` in `pyproject.toml`. No MinIO healthcheck in compose - not verified what tooling that image has available |
+| Notifications engine (in-app first) | not started | open | `Notification` table exists now - this is buildable |
+| Multi-stage profile onboarding UI | not started | open | needs a `/register`+`/login` endpoint wired to `auth.py` first (doesn't exist yet); extend `web/index.html`'s patterns, don't restart from scratch |
+| Migrate discovery/matching pipeline to be account-scoped | not started | open, deliberately deferred | still true: don't start until it can be scoped as its own deliberate change, not bundled into something else |
 | Document extraction (Ollama) | not started | deferred | owner explicitly deferred this; do not add an LLM call here without checking with them first |
 
 ## Review protocol
