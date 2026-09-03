@@ -79,6 +79,25 @@ it's kept current.
 The drafting package is now available through both a JSON API endpoint and a
 server-rendered review page. Submission remains intentionally absent.
 
+### Phase 2 (new, `SOLUTION_DEFINITION.md` §14): accounts, documents, containers
+
+Direct request, confirmed multi-tenant (separate logins, not a personal gate).
+Built as new, independently-tested infrastructure alongside the working MVP,
+**not wired into it yet** — `/discover`, `/matches`, `/digest`, `/ui` stay
+single-tenant until that migration is deliberately scoped as its own step.
+Don't assume auth applies to those endpoints just because it exists now.
+
+| Lane | Files | Owner | Status |
+|---|---|---|---|
+| Accounts / auth | `db.py` or similar, `auth.py` | Claude | starting now — password hashing + session, Postgres-backed |
+| Data model (Account/Profile/Document/Notification) | same | Claude | starting now — SQLAlchemy, tested against SQLite in-suite, Postgres in Docker |
+| Document vault (MinIO) | `documents.py` | Claude | starting now — upload/presigned-URL, client injected for testing like `search.py` was |
+| Docker Compose (api/worker/db/minio) | `docker-compose.yml`, `Dockerfile` | Claude | starting now |
+| Notifications engine (in-app first) | not started | open | needs the Notification table above to exist first |
+| Multi-stage profile onboarding UI | not started | open | needs accounts + Profile model to exist first; extend `web/index.html`'s patterns, don't restart from scratch |
+| Migrate discovery/matching pipeline to be account-scoped | not started | open, deliberately deferred | do not start this until Accounts/Data model above are committed and stable — it touches `api.py`/`store.py` broadly and will conflict with anything else happening there |
+| Document extraction (Ollama) | not started | deferred | owner explicitly deferred this; do not add an LLM call here without checking with them first |
+
 ## Review protocol
 
 We review each other by reading commits, not by talking. When you find something
