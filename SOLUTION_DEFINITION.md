@@ -342,3 +342,27 @@ Sign in (or register) → redirect to profile setup → owner picks which of the
 - Does not implement document extraction (needs the Ollama evaluation the owner asked to defer).
 - Does not implement email notifications (needs a provider decision, deferred like Tavily was).
 - Does not implement a task queue for `worker` — a scheduled/cron job runner is sufficient for what's actually being built now.
+
+## 15. Autonomous shortlisting and supervised submission (Phase 3)
+
+Direct request, 3 September: the human-approval gate moves from "should the agent even prepare this" to "should this already-drafted application actually be sent" — the system decides eligibility, shortlists, and drafts entirely on its own; the owner's only required action is a yes/no on a finished, submission-ready package. This is a real narrowing of the human's role from what §5.7/§10 originally described, and it's worth being precise about which parts are a small extension of what's already built versus a genuinely new capability.
+
+### Auto-shortlist and auto-draft (small extension — reuses existing code)
+
+`worker.py`'s discovery cycle already runs unattended; the only change is that instead of just adding opportunities to the store, it also runs `match_opportunity()` (already deterministic, already built) and, for anything `eligible`, calls `build_application_package()` (already built, no LLM, nothing unfounded — §5's guarantee holds) to prepare a draft immediately, without waiting for the owner to shortlist it by hand first. The owner's review moves to "here are N finished drafts, approve or reject each," which is exactly what the package view already renders — it just needs to start appearing automatically instead of on request.
+
+### Ineligible review and override (small extension)
+
+`needs_review`/`ineligible` items are already computed and already carry `failed_requirements`/`unknown_requirements` explaining why. The addition is one action: "prepare this anyway" on an ineligible item, which does exactly what shortlisting an eligible one does — runs `build_application_package()` regardless of the hard-rule failure, with the failure reasons still shown as a warning on the draft (`drafting.py` already produces that warning for non-eligible matches — see the ineligible-warning test). The owner is overriding the machine's eligibility read, not bypassing their own review of the draft before it goes anywhere.
+
+### Submission automation (genuinely new — not a small extension)
+
+"When the user approves, the system submits" requires something that does not exist anywhere in this codebase yet: actually filling a form on an external site and clicking submit. Nothing here has ever driven a browser or called a portal's own submission endpoint. This is exactly §6's "Application and bid executor" and §10's "Phase 2: supervised scholarship submission," described at length earlier in this document specifically because of the risks involved — a bug here doesn't fail a test, it submits real, possibly wrong, information to a real selection committee, or trips a site's bot detection (§8's LinkedIn findings apply generally: sites do watch for this). It needs, at minimum:
+
+- a **per-site adapter**, since scholarship application forms have no common structure — Browser Use or Skyvern (§6) as the execution layer, with deterministic selectors preferred over AI-driven clicking where a site is stable enough to have one;
+- **session isolation** per submission, so a failure on one application can't corrupt another;
+- a **hard stop for anything a form requires that isn't a known, mapped field** — never guess-fill a field the drafted package didn't already account for;
+- **receipt capture** — screenshot, confirmation page, submitted field values, timestamp — saved as evidence the submission actually happened and what was sent, not just a "success" boolean;
+- **exactly one approval-to-submission path**: approving the draft queues it; a separate, explicit action actually fires the browser automation, so "approve" and "submit right now" are never the same click on a scholarship portal that might have a fee, a CAPTCHA, or a point of no return.
+
+Sequencing: build and prove the auto-shortlist/auto-draft/override loop first (cheap, reuses everything, zero new external risk) and let it run for real for a while before starting submission automation — the whole point of shipping the review-and-draft loop early was to build trust in the matching and drafting before anything acts on the open internet on the owner's behalf. Not started this pass.
