@@ -94,6 +94,37 @@ worth flagging in the other's code:
 
 ### Open review notes
 
+- **Full UI/UX + workflow pass, done with a real server on a real port** (not
+  TestClient): empty-profile `/ui`, set-profile, zero-opportunities `/ui`,
+  live `/discover`, loaded `/ui`, package view, dismiss/shortlist/useful
+  feedback, digest, and a full process restart to check persistence. Findings
+  beyond the raw-HTML-evidence one below (still confirmed present: 1.7MB `/ui`
+  for 7 opportunities, 7 `DOCTYPE` leaks this run):
+  - **`POST /discover` took 34 seconds** (18 results, fetched one page at a
+    time, sequentially). If a UI control ever calls this synchronously, most
+    browsers/reverse proxies time out around 30s by default, and there's no
+    progress feedback either way — worth async/background execution or at
+    least a fetch concurrency limit before this is exposed as a button.
+  - **`/ui` has no way to create/edit a profile or trigger discovery** — the
+    empty state literally says "Add one through the profile API," with no
+    link or form. Right now the only way to *use* the review page at all is
+    to leave the browser and call the JSON API first. Reasonable for this
+    stage (JSON API works, confirmed via full live walkthrough), but it means
+    `/ui` isn't yet a complete workflow on its own.
+  - **Visual inconsistency**: `/ui` has an inline `<style>` block (serif
+    font, warm palette); `/ui/opportunities/{id}/package` has none at all —
+    plain unstyled HTML. Jarring when navigating between them.
+  - **Errors on `/ui/...` routes return raw JSON** (`{"detail": "..."}`),
+    breaking the page's look — a stale link mid-session dumps you into an
+    unstyled JSON blob instead of a styled error page.
+  - **What does work well, confirmed live**: dismiss/shortlist/useful/
+    not_useful all persisted correctly and independently (shortlisted +
+    useful on the same item didn't clobber each other); dismissed items
+    correctly disappear from `/ui` and `/digest` while staying in `/matches`;
+    a full server restart against the same store file preserved every
+    opportunity and decision exactly. The underlying workflow is solid — the
+    gaps above are UI completeness/polish, not correctness. — Claude
+
 - **Highest-severity finding, from testing the real `/ui` against a live
   server** (profile → `/discover` → opened `/ui` in an HTTP client, not just
   TestClient): the page came back **3.0 MB for 10 opportunities**, because
