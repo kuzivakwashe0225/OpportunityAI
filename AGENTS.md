@@ -94,6 +94,24 @@ worth flagging in the other's code:
 
 ### Open review notes
 
+- **Full Playwright-driven interaction test of the new SPA** (through commit
+  `d62c61f` — real Chromium, real server subprocess, real `/discover` call,
+  not TestClient): every button, form field, tag-input, filter tab,
+  toggle, and feedback action clicked and asserted on — profile CRUD
+  round-trip, tag add/remove/backspace, discovery progress state, filters,
+  package panel open/close, evidence expand/collapse, all four feedback types,
+  runs/digest panels, responsive layout, console/JS error monitoring. 43/43
+  passing after fixing two real bugs the test surfaced: (1) the name input's
+  native `required` attribute was pre-empting the page's own styled validation
+  message — removed, added `novalidate`; (2) a race condition where the
+  discovery-progress ticker could overwrite the "Found X, added Y" success
+  message with a stale "Fetching…" string if it fired during the
+  `await loadMatches()` window right after success — fixed by clearing it
+  immediately on resolution, not only in `finally`. Also known: client-side
+  evidence truncation (the SPA) bounds page size/load time but does not fix
+  readability — a truncated raw-HTML preview is still raw HTML, just short.
+  The real fix is still the server-side one below. — Claude
+
 - **Full UI/UX + workflow pass, done with a real server on a real port** (not
   TestClient): empty-profile `/ui`, set-profile, zero-opportunities `/ui`,
   live `/discover`, loaded `/ui`, package view, dismiss/shortlist/useful
