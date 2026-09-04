@@ -366,3 +366,41 @@ Direct request, 3 September: the human-approval gate moves from "should the agen
 - **exactly one approval-to-submission path**: approving the draft queues it; a separate, explicit action actually fires the browser automation, so "approve" and "submit right now" are never the same click on a scholarship portal that might have a fee, a CAPTCHA, or a point of no return.
 
 Sequencing: build and prove the auto-shortlist/auto-draft/override loop first (cheap, reuses everything, zero new external risk) and let it run for real for a while before starting submission automation — the whole point of shipping the review-and-draft loop early was to build trust in the matching and drafting before anything acts on the open internet on the owner's behalf. Not started this pass.
+
+## 16. The agentic product shape (Phase 4, built)
+
+Direct request, 4 September: the owner sets up a profile, and from then on the system works without them — finding, shortlisting and drafting on its own — surfacing work only when there's a finished application to approve. Plus proper multi-profile separation (scholarships / jobs / company) and a real multi-view interface rather than one page.
+
+### What the research changed
+
+Two patterns from surveying how mature agentic systems are actually built:
+
+**The three-tier gate model.** Not every agent action needs the same amount of human oversight. Auto-approve reversible work, "notify" for impactful-but-recoverable work (the agent proceeds and tells you), hard-gate anything irreversible. Mapped here:
+
+| Stage | Gate | Who acts |
+|---|---|---|
+| Discover, fetch, verify, match | auto | agent, unattended, on a schedule |
+| Shortlist eligible + draft the application | notify | agent proceeds, notification queued |
+| Submit | **hard** | human approves; nothing is sent automatically |
+
+**The Agent Inbox.** LangChain's open-source UX for exactly this problem is a Gmail-like queue of agent-prepared work awaiting approve/edit/reject. That's the review queue: the human meets *finished drafts*, not raw search results.
+
+### The skeptical finding on auto-submission
+
+Jobright — a funded company, ~9 people, $5M ARR, working on nothing but this — still cannot reliably auto-submit. Independent testers describe their "autopilot" as beta-stage and materially narrower than the marketing; for many applications it hands off to the company's own site to finish by hand, and most of the delivered value is one-click autofill via a browser extension.
+
+That is the state of the art from a team fully dedicated to the problem. It is direct evidence that **fully autonomous submission to arbitrary portals is a per-site engineering programme, not a feature** — and the reason §15's requirements (per-site adapters, session isolation, hard-stop on unmapped fields, receipt capture) are the real cost. The honest position: everything up to submission is automatable now and is where nearly all the time saving lives; submission stays a human click with a fully prepared package, until specific high-volume portals justify their own adapters.
+
+### Shape as built
+
+Per-profile pipeline (`pipeline.py`, `StoredOpportunity`, `ProfileDiscoveryRun`): each Profile is searched, matched, shortlisted and drafted independently, so the scholarship hunt and the company's tenders never mix. The worker sweeps every profile on every account on a schedule — this is what makes it work while the owner isn't there.
+
+Two orthogonal axes on an opportunity rather than one overloaded status: `match_status` (what the eligibility engine decided) and `stage` (where the human/agent workflow has got to). That's what makes "browse what it rejected and push one through anyway" a cheap query instead of a special case — and escalation deliberately preserves `match_status`, so the engine's disagreement stays visible on the draft rather than being quietly erased.
+
+`approve` and `submitted` are separate stages on purpose. Approving means the owner read the draft and is happy with it; it sends nothing. Marking submitted is them confirming they sent it themselves.
+
+### Still not built
+
+- **Learning from feedback.** Requested, not yet implemented. Worth being concrete about scale: this system will realistically see tens of opportunities a week and a handful of decisions on them. That is nowhere near enough to train a model, and claiming otherwise would be dishonest. What is achievable and useful at this data volume is explicit, inspectable heuristics — down-weighting sources the owner always dismisses, up-weighting terms that recur in what they approve, adjusting ranking weights from shortlist/dismiss signals — kept as a deterministic layer above the hard eligibility rules (§5.4), never replacing them. The `usefulness` field and decision history already collect the signal; nothing consumes it yet.
+- **Submission automation** (§15), for the reasons above.
+- **Email/push notifications** — in-app only so far; the channel decision still needs a provider.
