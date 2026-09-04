@@ -13,6 +13,14 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-opportunity}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-opportunity-secret}
+      # Ollama runs on the host, not in a container (SOLUTION_DEFINITION.md
+      # §14/§15) - host.docker.internal + extra_hosts below is the portable
+      # way to reach it from inside a Linux Docker Engine container ("localhost"
+      # here would mean the container itself, not the host).
+      OLLAMA_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:0.5b}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - opportunity-data:/data
     depends_on:
