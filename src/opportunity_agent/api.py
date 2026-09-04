@@ -16,6 +16,7 @@ from . import auth as auth_module
 from . import db as db_module
 from . import documents as documents_module
 from . import models_db
+from . import pipeline as pipeline_module
 from .digest import build_digest
 from .discovery import build_search_queries, discover
 from .connector import fetch_public_page
@@ -379,6 +380,208 @@ def extract_document(
     document.extraction_status = "extracted"
     db.commit()
     return profile
+
+
+class OpportunityOut(BaseModel):
+    id: str
+    canonical_url: str
+    payload: dict
+    match_status: str
+    match_score: int
+    match_reasons: dict
+    stage: str
+    escalated: bool
+    package: dict | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class NotificationOut(BaseModel):
+    id: str
+    profile_id: str | None
+    opportunity_id: str | None
+    kind: str
+    message: str
+    read_at: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# Indirection so tests can swap the network-touching halves of the cycle,
+# same pattern as `discover` on the older single-tenant path.
+_pipeline_search = pipeline_module.discover
+_pipeline_fetch = pipeline_module.fetch_public_page
+
+
+def _get_owned_opportunity(
+    profile: models_db.Profile, opportunity_id: str, db: Session
+) -> models_db.StoredOpportunity:
+    opportunity = db.get(models_db.StoredOpportunity, opportunity_id)
+    if opportunity is None or opportunity.profile_id != profile.id:
+        raise HTTPException(status_code=404, detail="opportunity not found")
+    return opportunity
+
+
+@app.post("/profiles/{profile_id}/run")
+def run_profile_pipeline(
+    profile_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    profile = _get_owned_profile(profile_id, account, db)
+    api_key = os.getenv("TAVILY_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="TAVILY_API_KEY is not configured")
+
+    run = pipeline_module.run_profile_cycle(
+        db, profile, api_key=api_key, search_fn=_pipeline_search, fetch_fn=_pipeline_fetch,
+    )
+    if run is None:
+        raise HTTPException(
+            status_code=409,
+            detail="this profile needs at least a name before the agent can search for anything",
+        )
+    return {
+        "run_id": run.id, "found": run.found, "added": run.added,
+        "drafted": run.drafted, "failures": run.failures,
+    }
+
+
+@app.get("/profiles/{profile_id}/opportunities", response_model=list[OpportunityOut])
+def list_profile_opportunities(
+    profile_id: str,
+    stage: str | None = None,
+    match_status: str | None = None,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> list[models_db.StoredOpportunity]:
+    profile = _get_owned_profile(profile_id, account, db)
+    query = db.query(models_db.StoredOpportunity).filter_by(profile_id=profile.id)
+    if stage:
+        query = query.filter_by(stage=stage)
+    if match_status:
+        query = query.filter_by(match_status=match_status)
+    return query.order_by(models_db.StoredOpportunity.created_at.desc()).all()
+
+
+@app.get("/profiles/{profile_id}/opportunities/{opportunity_id}", response_model=OpportunityOut)
+def get_profile_opportunity(
+    profile_id: str,
+    opportunity_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> models_db.StoredOpportunity:
+    profile = _get_owned_profile(profile_id, account, db)
+    return _get_owned_opportunity(profile, opportunity_id, db)
+
+
+def _set_stage(
+    profile_id: str, opportunity_id: str, stage: str, account: models_db.Account, db: Session
+) -> models_db.StoredOpportunity:
+    profile = _get_owned_profile(profile_id, account, db)
+    opportunity = _get_owned_opportunity(profile, opportunity_id, db)
+    opportunity.stage = stage
+    db.commit()
+    return opportunity
+
+
+@app.post("/profiles/{profile_id}/opportunities/{opportunity_id}/approve", response_model=OpportunityOut)
+def approve_opportunity(
+    profile_id: str,
+    opportunity_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> models_db.StoredOpportunity:
+    """The hard gate. Approving means the owner has read the draft and is happy
+    for it to go out - it deliberately does NOT send anything (see
+    SOLUTION_DEFINITION.md §16 on why auto-submission isn't built)."""
+    return _set_stage(profile_id, opportunity_id, "approved", account, db)
+
+
+@app.post("/profiles/{profile_id}/opportunities/{opportunity_id}/submitted", response_model=OpportunityOut)
+def mark_opportunity_submitted(
+    profile_id: str,
+    opportunity_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> models_db.StoredOpportunity:
+    """Owner confirming they actually sent it, on the portal, themselves."""
+    return _set_stage(profile_id, opportunity_id, "submitted", account, db)
+
+
+@app.post("/profiles/{profile_id}/opportunities/{opportunity_id}/dismiss", response_model=OpportunityOut)
+def dismiss_opportunity(
+    profile_id: str,
+    opportunity_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> models_db.StoredOpportunity:
+    return _set_stage(profile_id, opportunity_id, "dismissed", account, db)
+
+
+@app.post("/profiles/{profile_id}/opportunities/{opportunity_id}/escalate", response_model=OpportunityOut)
+def escalate_opportunity_endpoint(
+    profile_id: str,
+    opportunity_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> models_db.StoredOpportunity:
+    """Owner disagrees with the eligibility verdict - draft it anyway."""
+    profile = _get_owned_profile(profile_id, account, db)
+    opportunity = _get_owned_opportunity(profile, opportunity_id, db)
+    return pipeline_module.escalate_opportunity(db, opportunity)
+
+
+@app.get("/profiles/{profile_id}/summary")
+def profile_summary(
+    profile_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    profile = _get_owned_profile(profile_id, account, db)
+    rows = db.query(models_db.StoredOpportunity).filter_by(profile_id=profile.id).all()
+    last_run = (
+        db.query(models_db.ProfileDiscoveryRun)
+        .filter_by(profile_id=profile.id)
+        .order_by(models_db.ProfileDiscoveryRun.completed_at.desc())
+        .first()
+    )
+    return {
+        "total": len(rows),
+        "awaiting_review": sum(1 for r in rows if r.stage == "drafted"),
+        "approved": sum(1 for r in rows if r.stage == "approved"),
+        "submitted": sum(1 for r in rows if r.stage == "submitted"),
+        "not_eligible": sum(1 for r in rows if r.match_status != "eligible" and r.stage == "discovered"),
+        "last_run": last_run.completed_at.isoformat() if last_run else None,
+    }
+
+
+@app.get("/notifications", response_model=list[NotificationOut])
+def list_notifications(
+    unread: bool = False,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> list[models_db.Notification]:
+    query = db.query(models_db.Notification).filter_by(account_id=account.id)
+    if unread:
+        query = query.filter(models_db.Notification.read_at.is_(None))
+    return query.order_by(models_db.Notification.created_at.desc()).all()
+
+
+@app.post("/notifications/{notification_id}/read", response_model=NotificationOut)
+def mark_notification_read(
+    notification_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> models_db.Notification:
+    notification = db.get(models_db.Notification, notification_id)
+    if notification is None or notification.account_id != account.id:
+        raise HTTPException(status_code=404, detail="notification not found")
+    notification.read_at = datetime.now(timezone.utc)
+    db.commit()
+    return notification
 
 
 @app.get("/ui", response_class=HTMLResponse)
