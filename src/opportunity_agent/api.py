@@ -6,7 +6,7 @@ import jwt
 from dotenv import load_dotenv
 from fastapi import Cookie, Depends, FastAPI, File, Response, UploadFile
 from fastapi import HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -118,6 +118,13 @@ def _set_session_cookie(response: Response, account_id: str) -> None:
         SESSION_COOKIE, token, httponly=True, samesite="lax",
         max_age=int(auth_module.TOKEN_TTL.total_seconds()),
     )
+
+
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    """A user typing just the domain name should land somewhere real, not a
+    bare JSON 404 - found by the owner doing exactly that on the live deploy."""
+    return RedirectResponse(url="/ui")
 
 
 @app.get("/health")
