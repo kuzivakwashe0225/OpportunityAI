@@ -67,6 +67,12 @@ class Profile(Base):
     documents: Mapped[list["Document"]] = relationship(
         back_populates="profile", cascade="all, delete-orphan"
     )
+    opportunities: Mapped[list["StoredOpportunity"]] = relationship(
+        back_populates="profile", cascade="all, delete-orphan"
+    )
+    discovery_runs: Mapped[list["ProfileDiscoveryRun"]] = relationship(
+        back_populates="profile", cascade="all, delete-orphan"
+    )
 
 
 class Document(Base):
@@ -84,11 +90,68 @@ class Document(Base):
     profile: Mapped["Profile"] = relationship(back_populates="documents")
 
 
+class StoredOpportunity(Base):
+    """One opportunity, scoped to one Profile.
+
+    Replaces the single global OpportunityStore for the multi-profile pipeline
+    (SOLUTION_DEFINITION.md §16). `payload` holds the Opportunity pydantic
+    model's dump - same reasoning as Profile.fields: nothing queries individual
+    opportunity fields via SQL, matching happens in Python.
+
+    Two orthogonal axes rather than one overloaded status:
+      stage        - where the agent/human workflow has got to
+      match_status - what the eligibility engine decided (eligible /
+                     needs_review / ineligible), kept denormalised so the
+                     "browse what it rejected" view is a cheap query
+    """
+
+    __tablename__ = "opportunities"
+    __table_args__ = (
+        UniqueConstraint("profile_id", "canonical_url", name="uq_profile_opportunity_url"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id"), nullable=False)
+    canonical_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    match_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    match_score: Mapped[int] = mapped_column(default=0)
+    match_reasons: Mapped[dict] = mapped_column(JSON, default=dict)
+    stage: Mapped[str] = mapped_column(String(20), default="discovered")
+    escalated: Mapped[bool] = mapped_column(default=False)
+    package: Mapped[dict | None] = mapped_column(JSON, default=None)
+    usefulness: Mapped[str | None] = mapped_column(String(20), default=None)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+
+    profile: Mapped["Profile"] = relationship(back_populates="opportunities")
+
+
+class ProfileDiscoveryRun(Base):
+    """Audit record of one agent discovery cycle for one profile."""
+
+    __tablename__ = "profile_discovery_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id"), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(default=_now)
+    completed_at: Mapped[datetime] = mapped_column(default=_now)
+    queries: Mapped[list] = mapped_column(JSON, default=list)
+    found: Mapped[int] = mapped_column(default=0)
+    added: Mapped[int] = mapped_column(default=0)
+    drafted: Mapped[int] = mapped_column(default=0)
+    failures: Mapped[list] = mapped_column(JSON, default=list)
+
+    profile: Mapped["Profile"] = relationship(back_populates="discovery_runs")
+
+
 class Notification(Base):
     __tablename__ = "notifications"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+    profile_id: Mapped[str | None] = mapped_column(ForeignKey("profiles.id"), default=None)
+    opportunity_id: Mapped[str | None] = mapped_column(ForeignKey("opportunities.id"), default=None)
     kind: Mapped[str] = mapped_column(String(50), nullable=False)
     message: Mapped[str] = mapped_column(String(1000), nullable=False)
     read_at: Mapped[datetime | None] = mapped_column(default=None)
