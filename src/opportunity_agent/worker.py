@@ -83,13 +83,48 @@ def main() -> None:
 
     print(f"worker: starting, interval={interval}s, store={store_path}", flush=True)
     while True:
+        run_all_profile_cycles(api_key)
+
+        # The older single-tenant path, still running until it's retired
+        # (SOLUTION_DEFINITION.md §16) - harmless once no one uses /ui's legacy
+        # endpoints, and cheap to keep while both paths coexist.
         store = OpportunityStore(path=store_path)  # reload - api may have written since last cycle
         run = run_discovery_cycle(store, api_key)
-        if run is None:
-            print("worker: no profile set yet, skipping this cycle", flush=True)
-        else:
-            print(f"worker: found {run.found}, added {run.added}, failures {len(run.failures)}", flush=True)
+        if run is not None:
+            print(f"worker[legacy]: found {run.found}, added {run.added}", flush=True)
+
         time.sleep(interval)
+
+
+def run_all_profile_cycles(api_key: str) -> int:
+    """Run one unattended agent cycle for every profile that's set up.
+
+    This is what makes the system work while the owner isn't there: every
+    profile on every account gets its own discovery, matching, auto-shortlist
+    and auto-draft pass, with notifications queued for whatever came out.
+    """
+    from . import models_db, pipeline
+    from .db import SessionLocal
+
+    cycles = 0
+    with SessionLocal() as session:
+        profiles = session.query(models_db.Profile).all()
+        for profile in profiles:
+            try:
+                run = pipeline.run_profile_cycle(session, profile, api_key=api_key)
+            except Exception as error:  # one bad profile must not stop the rest
+                print(f"worker: profile {profile.id} failed: {error}", flush=True)
+                session.rollback()
+                continue
+            if run is None:
+                continue
+            cycles += 1
+            print(
+                f"worker: profile '{profile.display_name}' ({profile.profile_type}) - "
+                f"found {run.found}, added {run.added}, drafted {run.drafted}",
+                flush=True,
+            )
+    return cycles
 
 
 if __name__ == "__main__":
