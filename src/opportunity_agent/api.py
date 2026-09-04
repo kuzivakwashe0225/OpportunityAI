@@ -240,7 +240,15 @@ def create_profile(
 def list_profiles(
     account: models_db.Account = Depends(get_current_account), db: Session = Depends(get_db_session)
 ) -> list[models_db.Profile]:
-    return db.query(models_db.Profile).filter_by(account_id=account.id).all()
+    # Explicit ordering: without it the switcher's order - and which profile the
+    # UI picks as active when nothing is remembered - is whatever the database
+    # happens to return, which is not stable.
+    return (
+        db.query(models_db.Profile)
+        .filter_by(account_id=account.id)
+        .order_by(models_db.Profile.created_at)
+        .all()
+    )
 
 
 @app.get("/profiles/{profile_id}", response_model=ProfileOut)

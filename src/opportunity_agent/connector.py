@@ -5,11 +5,9 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from ipaddress import ip_address
 import socket
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
-
-from .discovery import canonicalize_url
 
 
 @dataclass(frozen=True)
@@ -21,14 +19,31 @@ class PublicPage:
     content_type: str = "text/html"
 
 
-def fetch_public_page(
-    url: str,
-    *,
-    client: httpx.Client | None = None,
-    max_bytes: int = 2_000_000,
-) -> PublicPage:
-    canonical_url = canonicalize_url(url)
-    parsed = urlsplit(canonical_url)
+MAX_REDIRECTS = 4
+
+# An honest, identifying agent string - deliberately NOT a spoofed browser one.
+# Several sites 403 a bare library default; identifying ourselves is the polite
+# fix for that. A site that still refuses an honest agent is saying no, and
+# SOLUTION_DEFINITION.md §8 means we take no for an answer rather than
+# disguising the client to get around it.
+USER_AGENT = "OpportunityAI/0.1 (+https://opportunityai.meshcloud.co.zw)"
+
+
+def _validate_public_url(url: str) -> str:
+    """SSRF-check one URL and return the exact URL to request.
+
+    Every redirect hop goes through this, not just the original URL - that is
+    the whole reason following redirects is safe here at all.
+
+    Deliberately does NOT return `canonicalize_url()`'s output. That function
+    strips trailing slashes because it defines *dedup identity* ("/x" and "/x/"
+    are the same opportunity). Requesting the stripped form makes servers that
+    canonicalise the other way 301 straight back to the slashed URL, which we'd
+    strip again - an infinite redirect loop. Measured live: this alone was
+    losing real scholarship pages (beittrust.org.uk, canoncollins.org).
+    Identity and fetch target are two different jobs.
+    """
+    parsed = urlsplit(url)
     if parsed.scheme != "https":
         raise ValueError("public source URL must use HTTPS")
     if parsed.username or parsed.password or parsed.port not in {None, 443}:
@@ -48,32 +63,57 @@ def fetch_public_page(
             raise ValueError("public source hostname could not be resolved") from error
         if any(ip_address(address[4][0]).is_private for address in addresses):
             raise ValueError("public source URL resolves to a private host")
+    # normalise only scheme/host casing and drop the fragment; path is untouched
+    return urlunsplit((
+        parsed.scheme.lower(), parsed.netloc.lower(), parsed.path, parsed.query, "",
+    ))
+
+
+def fetch_public_page(
+    url: str,
+    *,
+    client: httpx.Client | None = None,
+    max_bytes: int = 2_000_000,
+    max_redirects: int = MAX_REDIRECTS,
+) -> PublicPage:
+    target = _validate_public_url(url)
+
     owns_client = client is None
     http_client = client or httpx.Client(timeout=20.0, follow_redirects=False)
+    # httpx must still not follow redirects on its own: we follow them by hand
+    # precisely so each hop gets re-validated above before it's requested.
     if http_client.follow_redirects:
         raise ValueError("public source client must not follow redirects")
     try:
-        with http_client.stream("GET", canonical_url) as response:
-            response.raise_for_status()
-            if response.is_redirect:
-                raise ValueError("public source redirects are not followed")
-            chunks: list[bytes] = []
-            size = 0
-            for chunk in response.iter_bytes():
-                size += len(chunk)
-                if size > max_bytes:
-                    raise ValueError("public source response exceeds size limit")
-                chunks.append(chunk)
-            body = b"".join(chunks)
-            encoding = response.encoding or "utf-8"
-            content_type = response.headers.get("content-type", "text/html").split(";", 1)[0].strip().lower()
+        for _hop in range(max_redirects + 1):
+            with http_client.stream("GET", target, headers={"User-Agent": USER_AGENT}) as response:
+                if response.is_redirect:
+                    location = response.headers.get("location")
+                    if not location:
+                        raise ValueError("public source redirect had no location")
+                    target = _validate_public_url(urljoin(target, location))
+                    continue
+                response.raise_for_status()
+                chunks: list[bytes] = []
+                size = 0
+                for chunk in response.iter_bytes():
+                    size += len(chunk)
+                    if size > max_bytes:
+                        raise ValueError("public source response exceeds size limit")
+                    chunks.append(chunk)
+                body = b"".join(chunks)
+                encoding = response.encoding or "utf-8"
+                content_type = (
+                    response.headers.get("content-type", "text/html").split(";", 1)[0].strip().lower()
+                )
+                return PublicPage(
+                    url=target,
+                    content=body.decode(encoding, errors="replace"),
+                    retrieved_at=datetime.now(timezone.utc).isoformat(),
+                    sha256=sha256(body).hexdigest(),
+                    content_type=content_type,
+                )
+        raise ValueError("public source returned too many redirects")
     finally:
         if owns_client:
             http_client.close()
-    return PublicPage(
-        url=canonical_url,
-        content=body.decode(encoding, errors="replace"),
-        retrieved_at=datetime.now(timezone.utc).isoformat(),
-        sha256=sha256(body).hexdigest(),
-        content_type=content_type,
-    )

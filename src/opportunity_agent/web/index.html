@@ -6,694 +6,861 @@
 <title>OpportunityAI</title>
 <style>
   :root{
-    --bg:#f4f0e8; --surface:#fffdf8; --ink:#18211b; --ink-soft:#536157;
-    --line:#d8d2c5; --accent:#934326; --accent-soft:#f1e3d8;
-    --ok:#2f6d4f; --ok-soft:#e3efe7; --warn:#9a6b12; --warn-soft:#f6ecd6;
-    --bad:#a33b2d; --bad-soft:#f5e2de;
+    --bg:#f4f0e8; --surface:#fffdf8; --ink:#18211b; --ink-soft:#5b6a5e;
+    --line:#ded8ca; --accent:#934326; --accent-soft:#f3e5da;
+    --ok:#2f6d4f; --ok-soft:#e4efe8; --warn:#8a6410; --warn-soft:#f7edd4;
+    --bad:#a33b2d; --bad-soft:#f7e3df; --shell:#1d2620;
   }
   *{box-sizing:border-box;}
   body{margin:0;font-family:Georgia,"Times New Roman",serif;color:var(--ink);background:var(--bg);}
-  main{max-width:960px;margin:0 auto;padding:40px 24px 96px;}
-  h1{font-size:clamp(2rem,5vw,3.4rem);margin:0 0 4px;}
-  .intro{color:var(--ink-soft);margin:0 0 28px;font-size:1.05rem;}
-  section{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:22px 24px;margin-bottom:20px;}
-  section > h2{margin:0 0 14px;font-size:1.25rem;}
-  label{display:block;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.82rem;color:var(--ink-soft);margin:14px 0 4px;}
-  label:first-child{margin-top:0;}
-  input[type=text], input[type=number], select, textarea{
-    width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:4px;
-    font-family:ui-sans-serif,system-ui,sans-serif;font-size:.95rem;background:#fff;color:var(--ink);
-  }
-  textarea{min-height:64px;resize:vertical;}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 16px;}
-  .tag-input{display:flex;flex-wrap:wrap;gap:6px;padding:7px;border:1px solid var(--line);border-radius:4px;background:#fff;}
-  .tag-input input{border:none;flex:1;min-width:120px;padding:4px;font-size:.9rem;font-family:ui-sans-serif,system-ui,sans-serif;}
-  .tag-input input:focus{outline:none;}
-  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--accent-soft);color:var(--accent);
-    border-radius:14px;padding:3px 6px 3px 10px;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.82rem;white-space:nowrap;}
-  .chip button{border:none;background:none;color:var(--accent);cursor:pointer;font-size:.95rem;line-height:1;padding:2px;}
-  .btn{border:1px solid var(--accent);background:var(--accent);color:#fff;padding:10px 16px;border-radius:4px;
-    cursor:pointer;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.92rem;font-weight:600;}
-  .btn:hover{filter:brightness(1.06);}
-  .btn:disabled{opacity:.55;cursor:progress;}
+  button{font-family:ui-sans-serif,system-ui,sans-serif;cursor:pointer;}
+  input,select,textarea{font-family:ui-sans-serif,system-ui,sans-serif;}
+  h1,h2,h3{margin:0;}
+  a{color:var(--accent);}
+
+  /* ---------- shared controls ---------- */
+  .btn{border:1px solid var(--accent);background:var(--accent);color:#fff;padding:10px 16px;
+    border-radius:5px;font-size:.92rem;font-weight:600;}
+  .btn:hover{filter:brightness(1.07);}
+  .btn:disabled{opacity:.5;cursor:progress;}
   .btn.ghost{background:transparent;color:var(--accent);}
-  .btn.small{padding:6px 11px;font-size:.82rem;font-weight:500;}
+  .btn.small{padding:6px 12px;font-size:.82rem;font-weight:500;}
   .btn.danger{border-color:var(--bad);color:var(--bad);background:transparent;}
+  .btn.plain{border-color:var(--line);color:var(--ink-soft);background:#fff;}
+  .link-btn{background:none;border:none;color:var(--accent);text-decoration:underline;padding:0;font-size:.85rem;}
+  label{display:block;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.8rem;
+    color:var(--ink-soft);margin:14px 0 5px;}
+  input[type=text],input[type=password],input[type=number],select,textarea{
+    width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:5px;
+    font-size:.94rem;background:#fff;color:var(--ink);}
+  textarea{min-height:72px;resize:vertical;}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
-  .status-line{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.85rem;color:var(--ink-soft);margin-top:10px;}
-  .status-line.err{color:var(--bad);}
-  .status-line.ok{color:var(--ok);}
-  #error-banner{display:none;background:var(--bad-soft);color:var(--bad);border:1px solid var(--bad);
-    border-radius:4px;padding:10px 14px;margin-bottom:16px;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.9rem;}
-  #error-banner button{float:right;border:none;background:none;color:var(--bad);cursor:pointer;font-weight:700;}
-  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;}
-  .tab{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.85rem;padding:7px 13px;border-radius:20px;
-    border:1px solid var(--line);background:#fff;color:var(--ink-soft);cursor:pointer;}
-  .tab.active{background:var(--ink);border-color:var(--ink);color:#fff;}
-  .opportunity{border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:4px;padding:18px 20px;margin-bottom:14px;}
-  .opportunity.dismissed{opacity:.45;}
-  .opp-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline;}
-  .opp-head h3{margin:0;font-size:1.08rem;}
-  .badge{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.72rem;font-weight:700;text-transform:uppercase;
-    letter-spacing:.03em;padding:3px 9px;border-radius:20px;white-space:nowrap;}
-  .badge.eligible{background:var(--ok-soft);color:var(--ok);}
-  .badge.needs_review{background:var(--warn-soft);color:var(--warn);}
-  .badge.ineligible{background:var(--bad-soft);color:var(--bad);}
-  .meta{color:var(--ink-soft);font-family:ui-sans-serif,system-ui,sans-serif;font-size:.85rem;margin:6px 0;}
-  .reasons{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.85rem;margin:8px 0;}
-  .reasons.blockers{color:var(--bad);}
-  .evidence-preview{font-size:.92rem;color:var(--ink-soft);margin:8px 0;white-space:pre-wrap;word-break:break-word;}
-  .evidence-toggle{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.78rem;color:var(--accent);
-    background:none;border:none;cursor:pointer;padding:0;text-decoration:underline;}
-  .opp-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
-  .decision-tag{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.78rem;background:var(--ink);color:#fff;
-    border-radius:20px;padding:3px 10px;margin-left:8px;}
-  .package-panel{display:none;margin-top:14px;padding:14px 16px;background:var(--accent-soft);border-radius:4px;
-    font-family:ui-sans-serif,system-ui,sans-serif;font-size:.88rem;}
-  .package-panel pre{white-space:pre-wrap;background:#fff;padding:12px;border-radius:4px;border:1px solid var(--line);font-family:inherit;}
-  .package-panel ul{margin:6px 0;padding-left:20px;}
-  .empty{padding:20px 0;color:var(--ink-soft);font-family:ui-sans-serif,system-ui,sans-serif;}
-  #runs-panel, #digest-panel{display:none;margin-top:14px;}
-  table{width:100%;border-collapse:collapse;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.85rem;}
-  th, td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);}
-  #digest-panel{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.9rem;}
-  #digest-panel h3{font-size:1rem;margin:16px 0 8px;}
-  #digest-panel li{margin-bottom:10px;}
-  .spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.5);
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 18px;}
+  .muted{color:var(--ink-soft);font-family:ui-sans-serif,system-ui,sans-serif;font-size:.88rem;}
+  .status{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.85rem;color:var(--ink-soft);}
+  .status.err{color:var(--bad);} .status.ok{color:var(--ok);}
+  .spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.45);
     border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;margin-right:7px;vertical-align:-2px;}
   @keyframes spin{to{transform:rotate(360deg);}}
-  @media (max-width:640px){ .grid2{grid-template-columns:1fr;} }
+
+  /* ---------- tag input ---------- */
+  .tag-input{display:flex;flex-wrap:wrap;gap:6px;padding:7px;border:1px solid var(--line);
+    border-radius:5px;background:#fff;}
+  .tag-input input{border:none;flex:1;min-width:130px;padding:4px;font-size:.9rem;}
+  .tag-input input:focus{outline:none;}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--accent-soft);color:var(--accent);
+    border-radius:14px;padding:3px 6px 3px 10px;font-family:ui-sans-serif,system-ui,sans-serif;
+    font-size:.82rem;}
+  .chip button{border:none;background:none;color:var(--accent);font-size:.95rem;line-height:1;padding:2px;}
+
+  /* ---------- auth ---------- */
+  #auth-view{max-width:420px;margin:0 auto;padding:80px 24px;}
+  #auth-view h1{font-size:2.6rem;margin-bottom:6px;}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:24px;}
+
+  /* ---------- app shell ---------- */
+  header.appbar{background:var(--shell);color:#f2efe6;padding:0 22px;display:flex;
+    align-items:center;gap:18px;height:58px;position:sticky;top:0;z-index:20;}
+  header.appbar .brand{font-size:1.15rem;font-weight:700;letter-spacing:.02em;}
+  header.appbar .spacer{flex:1;}
+  .switcher{position:relative;}
+  .switcher-btn{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:#f2efe6;
+    padding:7px 12px;border-radius:5px;font-size:.85rem;display:flex;align-items:center;gap:8px;}
+  .switcher-menu{display:none;position:absolute;right:0;top:42px;background:var(--surface);
+    border:1px solid var(--line);border-radius:6px;min-width:250px;box-shadow:0 10px 28px #0003;overflow:hidden;}
+  .switcher-menu.open{display:block;}
+  .switcher-menu button{display:block;width:100%;text-align:left;background:none;border:none;
+    padding:11px 14px;font-size:.88rem;color:var(--ink);border-bottom:1px solid var(--line);}
+  .switcher-menu button:hover{background:var(--accent-soft);}
+  .switcher-menu button:last-child{border-bottom:none;}
+  .switcher-menu .type{display:block;font-size:.72rem;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em;}
+  .bell{position:relative;background:none;border:none;color:#f2efe6;font-size:1.15rem;padding:4px 8px;}
+  .bell .dot{position:absolute;top:0;right:2px;background:var(--bad);color:#fff;border-radius:10px;
+    font-size:.62rem;padding:1px 5px;font-family:ui-sans-serif,system-ui,sans-serif;font-weight:700;}
+
+  nav.tabs{background:var(--surface);border-bottom:1px solid var(--line);padding:0 22px;
+    display:flex;gap:4px;position:sticky;top:58px;z-index:19;overflow-x:auto;}
+  nav.tabs a{padding:13px 15px;text-decoration:none;color:var(--ink-soft);
+    font-family:ui-sans-serif,system-ui,sans-serif;font-size:.9rem;border-bottom:3px solid transparent;white-space:nowrap;}
+  nav.tabs a.active{color:var(--ink);border-bottom-color:var(--accent);font-weight:600;}
+  nav.tabs .badge{background:var(--accent);color:#fff;border-radius:10px;padding:1px 7px;
+    font-size:.72rem;margin-left:6px;font-weight:700;}
+
+  main{max-width:1000px;margin:0 auto;padding:30px 22px 90px;}
+  .view-title{font-size:1.7rem;margin-bottom:4px;}
+  .view-sub{color:var(--ink-soft);font-family:ui-sans-serif,system-ui,sans-serif;font-size:.92rem;margin:0 0 24px;}
+  section.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;
+    padding:22px;margin-bottom:18px;}
+  section.panel > h2{font-size:1.15rem;margin-bottom:14px;}
+
+  /* ---------- dashboard ---------- */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:14px;margin-bottom:20px;}
+  .stat{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:18px;}
+  .stat .n{font-size:2.1rem;line-height:1;}
+  .stat .k{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.78rem;color:var(--ink-soft);
+    text-transform:uppercase;letter-spacing:.06em;margin-top:8px;}
+  .stat.primary{border-left:4px solid var(--accent);}
+  .callout{background:var(--accent-soft);border:1px solid var(--accent);border-radius:8px;
+    padding:18px 20px;margin-bottom:18px;display:flex;justify-content:space-between;
+    align-items:center;gap:16px;flex-wrap:wrap;}
+  .callout p{margin:0;font-size:1rem;}
+
+  /* ---------- opportunity cards ---------- */
+  .opp{border:1px solid var(--line);border-left:5px solid var(--line);background:var(--surface);
+    border-radius:6px;padding:18px 20px;margin-bottom:14px;}
+  .opp.eligible{border-left-color:var(--ok);}
+  .opp.needs_review{border-left-color:var(--warn);}
+  .opp.ineligible{border-left-color:var(--bad);}
+  .opp-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline;}
+  .opp-head h3{font-size:1.05rem;}
+  .pill{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.7rem;font-weight:700;
+    text-transform:uppercase;letter-spacing:.04em;padding:3px 9px;border-radius:20px;white-space:nowrap;}
+  .pill.eligible{background:var(--ok-soft);color:var(--ok);}
+  .pill.needs_review{background:var(--warn-soft);color:var(--warn);}
+  .pill.ineligible{background:var(--bad-soft);color:var(--bad);}
+  .pill.stage{background:var(--ink);color:#fff;}
+  .reasons{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.85rem;margin:9px 0;color:var(--ink-soft);}
+  .opp-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+  .package{display:none;margin-top:15px;padding:16px;background:#fff;border:1px solid var(--line);
+    border-radius:6px;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.88rem;}
+  .package pre{white-space:pre-wrap;background:var(--bg);padding:13px;border-radius:5px;font-family:inherit;}
+  .package ul{margin:6px 0;padding-left:20px;}
+  .empty{padding:40px 20px;text-align:center;color:var(--ink-soft);
+    font-family:ui-sans-serif,system-ui,sans-serif;}
+
+  /* ---------- onboarding ---------- */
+  .steps{display:flex;gap:8px;margin-bottom:24px;flex-wrap:wrap;}
+  .step{flex:1;min-width:120px;padding:11px 14px;border:1px solid var(--line);border-radius:6px;
+    background:var(--surface);font-family:ui-sans-serif,system-ui,sans-serif;font-size:.85rem;color:var(--ink-soft);}
+  .step.active{border-color:var(--accent);color:var(--ink);font-weight:600;}
+  .step.done{background:var(--ok-soft);border-color:var(--ok);color:var(--ok);}
+  .type-pick{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;}
+  .type-card{border:2px solid var(--line);background:#fff;border-radius:8px;padding:18px;text-align:left;}
+  .type-card.selected{border-color:var(--accent);background:var(--accent-soft);}
+  .type-card strong{display:block;font-size:1rem;margin-bottom:5px;color:var(--ink);}
+  .type-card span{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.83rem;color:var(--ink-soft);}
+
+  /* ---------- documents / notifications ---------- */
+  table{width:100%;border-collapse:collapse;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.87rem;}
+  th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);}
+  th{color:var(--ink-soft);font-size:.76rem;text-transform:uppercase;letter-spacing:.05em;}
+  .notif{padding:13px 0;border-bottom:1px solid var(--line);font-family:ui-sans-serif,system-ui,sans-serif;}
+  .notif.unread{font-weight:600;}
+  .notif .when{font-size:.78rem;color:var(--ink-soft);}
+
+  #error-banner{display:none;background:var(--bad-soft);color:var(--bad);border:1px solid var(--bad);
+    border-radius:6px;padding:11px 15px;margin-bottom:16px;
+    font-family:ui-sans-serif,system-ui,sans-serif;font-size:.9rem;}
+  #error-banner button{float:right;border:none;background:none;color:var(--bad);font-weight:700;}
+
+  @media (max-width:680px){ .grid2{grid-template-columns:1fr;} header.appbar{padding:0 14px;gap:10px;} }
 </style>
 </head>
 <body>
-<main>
-  <div class="row" style="justify-content:space-between;align-items:baseline;">
-    <div>
-      <h1>OpportunityAI</h1>
-      <p class="intro">A quiet inbox for opportunities worth your attention.</p>
-    </div>
-    <button class="btn ghost small" id="logout-btn" type="button" hidden>Log out</button>
-  </div>
 
-  <div id="error-banner"><button id="error-dismiss" type="button" aria-label="Dismiss">&times;</button><span id="error-text"></span></div>
-
-  <section id="auth-section" hidden>
-    <h2 id="auth-heading">Log in</h2>
+<!-- ============ AUTH ============ -->
+<div id="auth-view" hidden>
+  <h1>OpportunityAI</h1>
+  <p class="muted" style="margin-bottom:26px;">Finds opportunities while you're busy. You review what's worth sending.</p>
+  <div class="card">
+    <h2 id="auth-heading" style="font-size:1.2rem;margin-bottom:6px;">Log in</h2>
     <form id="login-form">
       <label for="login-email">Email</label>
-      <input id="login-email" type="text" autocomplete="username" required>
+      <input id="login-email" type="text" autocomplete="username">
       <label for="login-password">Password</label>
-      <input id="login-password" type="password" autocomplete="current-password" required>
-      <div class="row" style="margin-top:14px;">
+      <input id="login-password" type="password" autocomplete="current-password">
+      <div class="row" style="margin-top:16px;">
         <button class="btn" type="submit">Log in</button>
-        <span class="status-line" id="login-status"></span>
+        <span class="status" id="login-status"></span>
       </div>
     </form>
-    <p class="meta" style="margin-top:18px;" id="register-toggle-row">
-      No account yet? <button class="evidence-toggle" id="show-register-btn" type="button">Register</button>
-    </p>
     <form id="register-form" hidden>
       <label for="register-email">Email</label>
-      <input id="register-email" type="text" autocomplete="username" required>
+      <input id="register-email" type="text" autocomplete="username">
       <label for="register-password">Password</label>
-      <input id="register-password" type="password" autocomplete="new-password" required>
-      <div class="row" style="margin-top:14px;">
-        <button class="btn" type="submit">Register</button>
-        <button class="btn ghost" id="show-login-btn" type="button">Back to log in</button>
-        <span class="status-line" id="register-status"></span>
+      <input id="register-password" type="password" autocomplete="new-password">
+      <div class="row" style="margin-top:16px;">
+        <button class="btn" type="submit">Create account</button>
+        <span class="status" id="register-status"></span>
       </div>
     </form>
-  </section>
+    <p class="muted" style="margin-top:18px;" id="auth-toggle-row">
+      No account yet? <button class="link-btn" id="show-register-btn" type="button">Create one</button>
+    </p>
+    <p class="muted" style="margin-top:18px;" id="auth-toggle-back" hidden>
+      Already have an account? <button class="link-btn" id="show-login-btn" type="button">Log in</button>
+    </p>
+  </div>
+</div>
 
-  <section id="profile-section" hidden>
-    <h2>Your profile</h2>
-    <form id="profile-form" novalidate>
-      <div class="grid2">
-        <div>
-          <label for="f-name">Name</label>
-          <input id="f-name" name="name" type="text">
-          <label for="f-country">Country</label>
-          <input id="f-country" name="country" type="text">
-          <label for="f-age">Age</label>
-          <input id="f-age" name="age" type="number" min="0" max="120">
-          <label for="f-study-level">Study level</label>
-          <select id="f-study-level" name="study_level">
-            <option value="">Not specified</option>
-            <option value="undergraduate">Undergraduate</option>
-            <option value="bachelors">Bachelors</option>
-            <option value="masters">Masters</option>
-            <option value="doctoral">Doctoral</option>
-          </select>
-          <label for="f-field">Field of study</label>
-          <input id="f-field" name="field" type="text">
-        </div>
-        <div>
-          <label for="f-history">Bio / history</label>
-          <textarea id="f-history" name="history"></textarea>
-          <label>Documents on hand</label>
-          <div class="tag-input" data-field="documents" id="tag-documents"><input type="text" placeholder="Add and press Enter&hellip;"></div>
-          <label>Interests</label>
-          <div class="tag-input" data-field="interests" id="tag-interests"><input type="text" placeholder="Add and press Enter&hellip;"></div>
-          <label>Goals</label>
-          <div class="tag-input" data-field="goals" id="tag-goals"><input type="text" placeholder="Add and press Enter&hellip;"></div>
-        </div>
-      </div>
-      <label>Certificates</label>
-      <div class="tag-input" data-field="certificates" id="tag-certificates"><input type="text" placeholder="e.g. BSc Computer Science, University of Zimbabwe (2021)"></div>
-      <label>Work history</label>
-      <div class="tag-input" data-field="work_history" id="tag-work_history"><input type="text" placeholder="e.g. Software Engineer, Acme Corp (2021-2024): built payments infrastructure"></div>
-      <div class="grid2">
-        <div>
-          <label>Preferred countries</label>
-          <div class="tag-input" data-field="preferred_countries" id="tag-preferred_countries"><input type="text" placeholder="Add and press Enter&hellip;"></div>
-        </div>
-        <div>
-          <label>Preferred funding</label>
-          <div class="tag-input" data-field="preferred_funding" id="tag-preferred_funding"><input type="text" placeholder="Add and press Enter&hellip;"></div>
-        </div>
-      </div>
-      <label>Achievements</label>
-      <div class="tag-input" data-field="achievements" id="tag-achievements"><input type="text" placeholder="Add and press Enter&hellip;"></div>
-      <label>Social &amp; portfolio links</label>
-      <div class="grid2">
-        <div>
-          <input id="f-social-linkedin" type="text" placeholder="LinkedIn URL">
-          <input id="f-social-github" type="text" placeholder="GitHub URL" style="margin-top:8px;">
-        </div>
-        <div>
-          <input id="f-social-portfolio" type="text" placeholder="Portfolio / website URL">
-          <input id="f-social-twitter" type="text" placeholder="X / Twitter URL" style="margin-top:8px;">
-        </div>
-      </div>
-      <div class="row" style="margin-top:18px;">
-        <button class="btn" id="save-profile-btn" type="submit">Save profile</button>
-        <span class="status-line" id="profile-status"></span>
-      </div>
-    </form>
-  </section>
-
-  <section id="actions-section" hidden>
-    <h2>Discovery</h2>
-    <div class="row">
-      <button class="btn" id="discover-btn" type="button">Run discovery</button>
-      <button class="btn ghost small" id="runs-toggle" type="button">View run history</button>
-      <button class="btn ghost small" id="digest-toggle" type="button">View digest</button>
+<!-- ============ APP SHELL ============ -->
+<div id="app-shell" hidden>
+  <header class="appbar">
+    <span class="brand">OpportunityAI</span>
+    <span class="spacer"></span>
+    <div class="switcher" id="switcher">
+      <button class="switcher-btn" id="switcher-btn" type="button">
+        <span id="active-profile-label">No profile</span> <span aria-hidden="true">▾</span>
+      </button>
+      <div class="switcher-menu" id="switcher-menu"></div>
     </div>
-    <p class="status-line" id="discover-status"></p>
-    <div id="runs-panel"><table id="runs-table"><thead><tr><th>Started</th><th>Queries</th><th>Found</th><th>Added</th><th>Failures</th></tr></thead><tbody></tbody></table></div>
-    <div id="digest-panel"></div>
-  </section>
+    <button class="bell" id="bell-btn" type="button" title="Notifications">
+      🔔<span class="dot" id="bell-dot" hidden>0</span>
+    </button>
+    <button class="btn ghost small" id="logout-btn" type="button" style="color:#f2efe6;border-color:rgba(255,255,255,.3);">Log out</button>
+  </header>
 
-  <section id="opportunities-section" hidden>
-    <h2>Opportunities</h2>
-    <div class="tabs" id="filter-tabs">
-      <button class="tab active" data-filter="all" type="button">All</button>
-      <button class="tab" data-filter="eligible" type="button">Eligible</button>
-      <button class="tab" data-filter="needs_review" type="button">Needs review</button>
-      <button class="tab" data-filter="ineligible" type="button">Ineligible</button>
-      <button class="tab" data-filter="shortlisted" type="button">Shortlisted</button>
-    </div>
-    <div id="opportunities-list"><p class="empty">Loading&hellip;</p></div>
-  </section>
-</main>
+  <nav class="tabs" id="tabs">
+    <a href="#/dashboard" data-route="dashboard">Dashboard</a>
+    <a href="#/review" data-route="review">Review queue<span class="badge" id="review-badge" hidden>0</span></a>
+    <a href="#/opportunities" data-route="opportunities">All opportunities</a>
+    <a href="#/profile" data-route="profile">Profile &amp; documents</a>
+    <a href="#/notifications" data-route="notifications">Notifications</a>
+  </nav>
+
+  <main>
+    <div id="error-banner"><button id="error-dismiss" type="button">&times;</button><span id="error-text"></span></div>
+    <div id="view-root"></div>
+  </main>
+</div>
 
 <script>
 (function () {
   "use strict";
 
-  var state = { profile: null, matches: [], filter: "all", packageHtml: {}, openPackages: {} };
-  var LIST_FIELDS = ["documents", "interests", "goals", "certificates", "work_history", "preferred_countries", "preferred_funding", "achievements"];
+  var state = { account:null, profiles:[], activeProfileId:null, notifications:[], opportunities:[], summary:null };
+  var LIST_FIELDS = ["documents","interests","goals","certificates","work_history","preferred_countries","preferred_funding","achievements"];
+  var SOCIAL = ["linkedin","github","portfolio","twitter"];
+  var TYPES = [
+    {id:"scholarship", name:"Scholarships", blurb:"Degrees, fellowships, funded study."},
+    {id:"job",         name:"Jobs",         blurb:"Employment and career openings."},
+    {id:"grant",       name:"Grants & tenders", blurb:"Funding and contracts for your company."}
+  ];
 
-  function $(sel, root) { return (root || document).querySelector(sel); }
-  function $all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
-  function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
+  function $(s,r){return (r||document).querySelector(s);}
+  function $all(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s));}
+  function esc(s){var d=document.createElement("div");d.textContent=s==null?"":String(s);return d.innerHTML;}
+  function typeName(id){for(var i=0;i<TYPES.length;i++){if(TYPES[i].id===id)return TYPES[i].name;}return id;}
 
-  function showError(message) {
-    $("#error-text").textContent = message;
-    $("#error-banner").style.display = "block";
-  }
-  $("#error-dismiss").addEventListener("click", function () { $("#error-banner").style.display = "none"; });
+  function showError(msg){$("#error-text").textContent=msg;$("#error-banner").style.display="block";}
+  $("#error-dismiss").addEventListener("click",function(){$("#error-banner").style.display="none";});
 
-  async function api(path, options) {
+  async function api(path, options){
     var response;
-    try {
-      response = await fetch(path, options);
-    } catch (networkError) {
-      throw new Error("Network error reaching " + path + ": " + networkError.message);
+    try { response = await fetch(path, options); }
+    catch(e){ throw new Error("Network error reaching "+path+": "+e.message); }
+    if(!response.ok){
+      var detail="";
+      try{ detail=(await response.json()).detail||""; }catch(e){}
+      var err = new Error(detail || ("Request to "+path+" failed"));
+      err.status = response.status;
+      throw err;
     }
-    if (!response.ok) {
-      var detail = "";
-      try { detail = (await response.json()).detail || ""; } catch (e) { /* body wasn't JSON */ }
-      throw new Error((detail || ("Request to " + path + " failed")) + " (HTTP " + response.status + ")");
-    }
-    if (response.status === 204) return null;
+    if(response.status===204) return null;
     return response.json();
   }
 
-  // ---------- tag inputs ----------
-  function initTagInput(container, initialValues) {
-    (initialValues || []).forEach(function (v) { addChip(container, v); });
-    var input = $("input", container);
-    input.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" || e.key === ",") {
-        e.preventDefault();
-        var value = input.value.trim().replace(/,$/, "");
-        if (value) { addChip(container, value); input.value = ""; }
-      } else if (e.key === "Backspace" && input.value === "") {
-        var chips = $all(".chip", container);
-        if (chips.length) removeChip(chips[chips.length - 1]);
-      }
+  // ---------------- tag inputs ----------------
+  function buildTagInput(field, placeholder, values){
+    var id = "tag-"+field;
+    setTimeout(function(){
+      var container=$("#"+id); if(!container) return;
+      (values||[]).forEach(function(v){addChip(container,v);});
+      var input=$("input",container);
+      input.addEventListener("keydown",function(e){
+        if(e.key==="Enter"||e.key===","){
+          e.preventDefault();
+          var v=input.value.trim().replace(/,$/,"");
+          if(v){addChip(container,v);input.value="";}
+        } else if(e.key==="Backspace"&&input.value===""){
+          var chips=$all(".chip",container);
+          if(chips.length) chips[chips.length-1].remove();
+        }
+      });
+    },0);
+    return "<div class='tag-input' id='"+id+"'><input type='text' placeholder='"+esc(placeholder)+"'></div>";
+  }
+  function addChip(container,value){
+    var chip=document.createElement("span"); chip.className="chip"; chip.textContent=value;
+    var rm=document.createElement("button"); rm.type="button"; rm.setAttribute("aria-label","Remove "+value);
+    rm.textContent="×"; rm.addEventListener("click",function(){chip.remove();});
+    chip.appendChild(rm); container.insertBefore(chip,$("input",container));
+  }
+  function readTags(field){
+    var c=$("#tag-"+field); if(!c) return [];
+    return $all(".chip",c).map(function(chip){return chip.firstChild.textContent;});
+  }
+
+  // ---------------- shell ----------------
+  function activeProfile(){
+    for(var i=0;i<state.profiles.length;i++){
+      if(state.profiles[i].id===state.activeProfileId) return state.profiles[i];
+    }
+    return null;
+  }
+
+  function renderSwitcher(){
+    var p = activeProfile();
+    $("#active-profile-label").textContent = p ? p.display_name : "No profile";
+    var menu=$("#switcher-menu");
+    if(!state.profiles.length){
+      menu.innerHTML = "<button type='button' data-action='onboard'>Set up your first profile</button>";
+    } else {
+      menu.innerHTML = state.profiles.map(function(pr){
+        return "<button type='button' data-id='"+esc(pr.id)+"'>"+esc(pr.display_name)+
+               "<span class='type'>"+esc(typeName(pr.profile_type))+"</span></button>";
+      }).join("") + (state.profiles.length < TYPES.length
+          ? "<button type='button' data-action='onboard'>+ Add another profile</button>" : "");
+    }
+    $all("button",menu).forEach(function(btn){
+      btn.addEventListener("click",function(){
+        menu.classList.remove("open");
+        if(btn.dataset.action==="onboard"){ location.hash="#/onboarding"; return; }
+        state.activeProfileId=btn.dataset.id;
+        try{ localStorage.setItem("activeProfileId", btn.dataset.id); }catch(e){}
+        renderSwitcher(); renderRoute();
+      });
     });
   }
+  $("#switcher-btn").addEventListener("click",function(e){
+    e.stopPropagation(); $("#switcher-menu").classList.toggle("open");
+  });
+  document.addEventListener("click",function(){$("#switcher-menu").classList.remove("open");});
+  $("#bell-btn").addEventListener("click",function(){location.hash="#/notifications";});
 
-  function addChip(container, value) {
-    var chip = document.createElement("span");
-    chip.className = "chip";
-    chip.textContent = value;
-    var remove = document.createElement("button");
-    remove.type = "button";
-    remove.setAttribute("aria-label", "Remove " + value);
-    remove.textContent = "×";
-    remove.addEventListener("click", function () { removeChip(chip); });
-    chip.appendChild(remove);
-    container.insertBefore(chip, $("input", container));
+  function renderBadges(){
+    var unread = state.notifications.filter(function(n){return !n.read_at;}).length;
+    var dot=$("#bell-dot");
+    dot.hidden = unread===0; dot.textContent = unread;
+    var badge=$("#review-badge");
+    var awaiting = state.summary ? state.summary.awaiting_review : 0;
+    badge.hidden = !awaiting; badge.textContent = awaiting;
   }
 
-  function removeChip(chip) { chip.remove(); }
+  // ---------------- routing ----------------
+  var ROUTES = {dashboard:renderDashboard, review:renderReview, opportunities:renderOpportunities,
+                profile:renderProfile, notifications:renderNotifications, onboarding:renderOnboarding};
 
-  function readTags(container) {
-    return $all(".chip", container).map(function (chip) { return chip.firstChild.textContent; });
+  function currentRoute(){
+    var r=(location.hash||"").replace(/^#\//,"");
+    return ROUTES[r] ? r : "dashboard";
   }
 
-  function clearTags(container) { $all(".chip", container).forEach(removeChip); }
+  async function renderRoute(){
+    var route=currentRoute();
+    $all("nav.tabs a").forEach(function(a){
+      a.classList.toggle("active", a.dataset.route===route);
+    });
+    if(!state.profiles.length && route!=="onboarding"){ location.hash="#/onboarding"; return; }
+    $("#view-root").innerHTML="<p class='empty'>Loading…</p>";
+    try { await ROUTES[route](); }
+    catch(err){ showError(err.message); $("#view-root").innerHTML="<p class='empty'>Could not load this view.</p>"; }
+  }
+  window.addEventListener("hashchange",renderRoute);
 
-  LIST_FIELDS.forEach(function (field) { initTagInput($("#tag-" + field), []); });
+  // ---------------- dashboard ----------------
+  async function renderDashboard(){
+    var p=activeProfile();
+    if(!p){ location.hash="#/onboarding"; return; }
+    var summary = await api("/profiles/"+p.id+"/summary");
+    state.summary = summary; renderBadges();
 
-  // ---------- profile ----------
-  async function loadProfile() {
-    try {
-      var profile = await api("/profile");
-      state.profile = profile;
-      if (profile) fillProfileForm(profile);
-    } catch (err) {
-      showError("Could not load profile: " + err.message);
+    var lastRun = summary.last_run ? new Date(summary.last_run).toLocaleString() : "never";
+    var cta = summary.awaiting_review
+      ? "<div class='callout'><p><strong>"+summary.awaiting_review+" application"+
+        (summary.awaiting_review===1?" is":"s are")+" drafted and waiting for you.</strong><br>"+
+        "<span class='muted'>The agent prepared these on its own. Nothing is sent until you approve it.</span></p>"+
+        "<a class='btn' href='#/review'>Review them</a></div>"
+      : "<div class='callout'><p><strong>Nothing waiting for you right now.</strong><br><span class='muted'>"+
+        "The agent keeps searching in the background and will queue up anything you're eligible for.</span></p>"+
+        "<button class='btn' id='run-now-btn' type='button'>Search now</button></div>";
+
+    $("#view-root").innerHTML =
+      "<h1 class='view-title'>"+esc(p.display_name)+"</h1>"+
+      "<p class='view-sub'>"+esc(typeName(p.profile_type))+" · last searched "+esc(lastRun)+"</p>"+
+      cta+
+      "<div class='stats'>"+
+        stat(summary.awaiting_review,"Awaiting your review",true)+
+        stat(summary.total,"Found in total")+
+        stat(summary.not_eligible,"Judged not eligible")+
+        stat(summary.approved,"Approved by you")+
+        stat(summary.submitted,"Marked submitted")+
+      "</div>"+
+      "<section class='panel'><h2>How this works</h2>"+
+      "<p class='muted' style='margin:0 0 10px;'>The agent runs on its own schedule. It searches using your profile, "+
+      "checks each opportunity against your eligibility, and drafts a full application for the ones you qualify for.</p>"+
+      "<p class='muted' style='margin:0;'>You only step in at the end: read the draft, approve it, and send it. "+
+      "It never submits anything for you. If you disagree with something it ruled out, you can push it through from "+
+      "<a href='#/opportunities'>All opportunities</a>.</p></section>"+
+      "<div class='row'><button class='btn plain' id='run-now-btn2' type='button'>Search now</button>"+
+      "<span class='status' id='run-status'></span></div>";
+
+    ["run-now-btn","run-now-btn2"].forEach(function(id){
+      var b=$("#"+id); if(b) b.addEventListener("click",function(){runNow(b);});
+    });
+  }
+  function stat(n,k,primary){
+    return "<div class='stat"+(primary?" primary":"")+"'><div class='n'>"+n+"</div><div class='k'>"+esc(k)+"</div></div>";
+  }
+
+  async function runNow(btn){
+    var p=activeProfile(); if(!p) return;
+    var status=$("#run-status")||{};
+    btn.disabled=true; var original=btn.textContent;
+    btn.innerHTML="<span class='spinner'></span>Searching…";
+    var started=Date.now();
+    var ticker=setInterval(function(){
+      if(status) { status.textContent="Searching and verifying… ("+Math.round((Date.now()-started)/1000)+"s)"; }
+    },1000);
+    try{
+      var result=await api("/profiles/"+p.id+"/run",{method:"POST"});
+      clearInterval(ticker);
+      if(status){
+        status.textContent="Found "+result.found+", added "+result.added+", drafted "+result.drafted+".";
+        status.className="status ok";
+      }
+      await loadNotifications();
+      renderRoute();
+    }catch(err){
+      clearInterval(ticker);
+      if(status){ status.textContent=err.message; status.className="status err"; }
+    }finally{
+      clearInterval(ticker); btn.disabled=false; btn.textContent=original;
     }
   }
 
-  var SOCIAL_PLATFORMS = ["linkedin", "github", "portfolio", "twitter"];
+  // ---------------- review queue ----------------
+  async function renderReview(){
+    var p=activeProfile(); if(!p){location.hash="#/onboarding";return;}
+    var items=await api("/profiles/"+p.id+"/opportunities?stage=drafted");
+    state.opportunities=items;
 
-  function fillProfileForm(profile) {
-    $("#f-name").value = profile.name || "";
-    $("#f-country").value = profile.country || "";
-    $("#f-age").value = profile.age == null ? "" : profile.age;
-    $("#f-study-level").value = profile.study_level || "";
-    $("#f-field").value = profile.field || "";
-    $("#f-history").value = profile.history || "";
-    LIST_FIELDS.forEach(function (field) {
-      var container = $("#tag-" + field);
-      clearTags(container);
-      (profile[field] || []).forEach(function (v) { addChip(container, v); });
-    });
-    var links = profile.social_links || {};
-    SOCIAL_PLATFORMS.forEach(function (platform) {
-      $("#f-social-" + platform).value = links[platform] || "";
+    var body = items.length
+      ? items.map(oppCard).join("")
+      : "<div class='empty'>Nothing waiting. The agent will queue applications here as it finds and drafts them.</div>";
+
+    $("#view-root").innerHTML =
+      "<h1 class='view-title'>Review queue</h1>"+
+      "<p class='view-sub'>Applications the agent has already written. Read one, then approve it — "+
+      "approving does not send anything, it marks it ready for you to submit on the portal.</p>"+body;
+    wireOppCards();
+  }
+
+  // ---------------- all opportunities ----------------
+  async function renderOpportunities(){
+    var p=activeProfile(); if(!p){location.hash="#/onboarding";return;}
+    var items=await api("/profiles/"+p.id+"/opportunities");
+    state.opportunities=items;
+
+    var groups={eligible:[],needs_review:[],ineligible:[]};
+    items.forEach(function(o){ (groups[o.match_status]||groups.ineligible).push(o); });
+
+    function section(title,blurb,list){
+      return "<section class='panel'><h2>"+esc(title)+" <span class='muted'>("+list.length+")</span></h2>"+
+        "<p class='muted' style='margin:-6px 0 14px;'>"+esc(blurb)+"</p>"+
+        (list.length? list.map(oppCard).join("") : "<div class='empty'>Nothing here yet.</div>")+"</section>";
+    }
+
+    $("#view-root").innerHTML =
+      "<h1 class='view-title'>All opportunities</h1>"+
+      "<p class='view-sub'>Everything the agent has found for this profile, including what it ruled out — "+
+      "if you think it got one wrong, push it through and it will draft an application anyway.</p>"+
+      section("Eligible","The agent qualified you for these and has drafted applications.",groups.eligible)+
+      section("Needs more information","Something was missing from your profile or the listing, so it held off.",groups.needs_review)+
+      section("Judged not eligible","It found a hard blocker. Disagree? Use “Apply anyway”.",groups.ineligible);
+    wireOppCards();
+  }
+
+  function oppCard(o){
+    var opp=o.payload||{};
+    var reasons = o.match_status==="eligible" ? (o.match_reasons.matched||[])
+                 : (o.match_reasons.failed||[]).concat(o.match_reasons.unknown||[]);
+    var deadline = opp.deadline || "Not specified";
+    var actions = [];
+    if(o.stage==="drafted"){
+      actions.push(btn("approve","Approve","btn small"));
+      actions.push(btn("dismiss","Not interested","btn small danger"));
+    } else if(o.stage==="approved"){
+      actions.push("<a class='btn small' href='"+esc(opp.url)+"' target='_blank' rel='noopener'>Open portal to submit</a>");
+      actions.push(btn("submitted","I've submitted it","btn small plain"));
+    } else if(o.match_status!=="eligible" && o.stage==="discovered"){
+      actions.push(btn("escalate","Apply anyway","btn small plain"));
+      actions.push(btn("dismiss","Not interested","btn small danger"));
+    }
+    if(o.package) actions.unshift(btn("package","View application","btn small ghost"));
+
+    return "<article class='opp "+esc(o.match_status)+"' data-id='"+esc(o.id)+"'>"+
+      "<div class='opp-head'><h3><a href='"+esc(opp.url)+"' target='_blank' rel='noopener'>"+
+        esc(opp.title||"Untitled")+"</a></h3>"+
+        "<span class='pill "+esc(o.match_status)+"'>"+esc(o.match_status.replace("_"," "))+"</span></div>"+
+      "<p class='muted'>"+esc(opp.source||"")+" · deadline "+esc(deadline)+
+        " · score "+o.match_score+
+        (o.stage!=="discovered"?" <span class='pill stage'>"+esc(o.stage)+"</span>":"")+
+        (o.escalated?" <span class='pill stage'>pushed through by you</span>":"")+"</p>"+
+      (reasons.length? "<p class='reasons'><strong>"+(o.match_status==="eligible"?"Matches":"Blockers")+
+        ":</strong> "+esc(reasons.join("; "))+"</p>" : "")+
+      "<div class='opp-actions'>"+actions.join("")+"</div>"+
+      "<div class='package'>"+(o.package?renderPackage(o.package):"")+"</div></article>";
+  }
+  function btn(action,label,cls){
+    return "<button type='button' class='"+cls+"' data-act='"+action+"'>"+esc(label)+"</button>";
+  }
+  function renderPackage(pkg){
+    var checklist=(pkg.checklist||[]).map(function(i){
+      return "<li><strong>"+esc(i.status)+"</strong>: "+esc(i.requirement)+"</li>";}).join("");
+    var warnings=(pkg.warnings||[]).length
+      ? (pkg.warnings).map(function(w){return "<li>"+esc(w)+"</li>";}).join("")
+      : "<li>None</li>";
+    return "<strong>Requirement checklist</strong><ul>"+checklist+"</ul>"+
+      "<strong>Draft cover note</strong><pre>"+esc(pkg.cover_note||"")+"</pre>"+
+      "<strong>Warnings</strong><ul>"+warnings+"</ul>";
+  }
+
+  function wireOppCards(){
+    $all(".opp").forEach(function(card){
+      var id=card.dataset.id;
+      $all("button[data-act]",card).forEach(function(b){
+        b.addEventListener("click",function(){ oppAction(id,b.dataset.act,card,b); });
+      });
     });
   }
 
-  function buildProfilePayload() {
-    var payload = {
-      name: $("#f-name").value.trim(),
-      country: $("#f-country").value.trim() || null,
-      age: $("#f-age").value === "" ? null : Number($("#f-age").value),
-      study_level: $("#f-study-level").value || null,
-      field: $("#f-field").value.trim() || null,
-      history: $("#f-history").value.trim() || null
+  async function oppAction(id,action,card,button){
+    var p=activeProfile();
+    if(action==="package"){
+      var panel=$(".package",card);
+      panel.style.display = panel.style.display==="block" ? "none" : "block";
+      return;
+    }
+    button.disabled=true;
+    try{
+      await api("/profiles/"+p.id+"/opportunities/"+id+"/"+action,{method:"POST"});
+      await loadNotifications();
+      renderRoute();
+    }catch(err){ showError(err.message); button.disabled=false; }
+  }
+
+  // ---------------- profile & documents ----------------
+  async function renderProfile(){
+    var p=activeProfile(); if(!p){location.hash="#/onboarding";return;}
+    var full=await api("/profiles/"+p.id);
+    var f=full.fields||{};
+    var docs=await api("/profiles/"+p.id+"/documents");
+
+    $("#view-root").innerHTML =
+      "<h1 class='view-title'>Profile &amp; documents</h1>"+
+      "<p class='view-sub'>The richer this is, the better the agent searches. Everything here is editable — "+
+      "including anything it filled in from your documents.</p>"+
+      "<section class='panel'><h2>Documents</h2>"+
+      "<p class='muted' style='margin:-6px 0 14px;'>Upload a CV and the agent will read it and fill in what it can. "+
+      "It never overwrites something you typed yourself.</p>"+
+      "<div class='row'><input type='file' id='doc-file' style='flex:1;'>"+
+      "<button class='btn small' id='doc-upload-btn' type='button'>Upload</button>"+
+      "<span class='status' id='doc-status'></span></div>"+
+      (docs.length? "<table style='margin-top:16px;'><thead><tr><th>File</th><th>Status</th><th></th></tr></thead><tbody>"+
+        docs.map(function(d){
+          return "<tr><td>"+esc(d.original_filename)+"</td><td>"+esc(d.extraction_status)+"</td>"+
+            "<td style='text-align:right;'>"+
+            (d.extraction_status!=="extracted"?"<button class='btn small ghost' data-extract='"+esc(d.id)+"'>Read it</button> ":"")+
+            "<button class='btn small danger' data-deldoc='"+esc(d.id)+"'>Delete</button></td></tr>";
+        }).join("")+"</tbody></table>"
+        : "<p class='empty'>No documents yet.</p>")+
+      "</section>"+
+      "<section class='panel'><h2>Details</h2><form id='profile-form'>"+profileFields(full,f)+
+      "<div class='row' style='margin-top:18px;'><button class='btn' type='submit'>Save profile</button>"+
+      "<span class='status' id='profile-status'></span></div></form></section>";
+
+    LIST_FIELDS.forEach(function(field){ /* inputs already built by profileFields */ });
+    wireProfileForm(full);
+    wireDocuments(p.id);
+  }
+
+  function profileFields(full,f){
+    return "<label for='f-display'>Profile name</label>"+
+      "<input id='f-display' type='text' value='"+esc(full.display_name)+"'>"+
+      "<div class='grid2'><div>"+
+      "<label for='f-name'>Your name</label><input id='f-name' type='text' value='"+esc(f.name||"")+"'>"+
+      "<label for='f-country'>Country</label><input id='f-country' type='text' value='"+esc(f.country||"")+"'>"+
+      "<label for='f-age'>Age</label><input id='f-age' type='number' min='0' max='120' value='"+(f.age==null?"":f.age)+"'>"+
+      "<label for='f-study'>Study level</label><select id='f-study'>"+
+        ["","undergraduate","bachelors","masters","doctoral"].map(function(v){
+          return "<option value='"+v+"'"+((f.study_level||"")===v?" selected":"")+">"+(v||"Not specified")+"</option>";
+        }).join("")+"</select>"+
+      "<label for='f-field'>Field</label><input id='f-field' type='text' value='"+esc(f.field||"")+"'>"+
+      "</div><div>"+
+      "<label for='f-history'>About you</label><textarea id='f-history'>"+esc(f.history||"")+"</textarea>"+
+      "<label>Documents on hand</label>"+buildTagInput("documents","transcript, cv…",f.documents)+
+      "<label>Interests</label>"+buildTagInput("interests","Add and press Enter…",f.interests)+
+      "<label>Goals</label>"+buildTagInput("goals","What are you trying to achieve?",f.goals)+
+      "</div></div>"+
+      "<label>Certificates</label>"+buildTagInput("certificates","e.g. BSc Computer Science (2021)",f.certificates)+
+      "<label>Work history</label>"+buildTagInput("work_history","e.g. Software Engineer, Acme (2021-2024)",f.work_history)+
+      "<div class='grid2'><div><label>Preferred countries</label>"+
+        buildTagInput("preferred_countries","Add and press Enter…",f.preferred_countries)+"</div>"+
+      "<div><label>Preferred funding</label>"+
+        buildTagInput("preferred_funding","Add and press Enter…",f.preferred_funding)+"</div></div>"+
+      "<label>Achievements</label>"+buildTagInput("achievements","Add and press Enter…",f.achievements)+
+      "<label>Links</label><div class='grid2'><div>"+
+      SOCIAL.slice(0,2).map(function(s){return "<input id='f-social-"+s+"' type='text' placeholder='"+s+" URL' value='"+
+        esc((f.social_links||{})[s]||"")+"' style='margin-bottom:8px;'>";}).join("")+"</div><div>"+
+      SOCIAL.slice(2).map(function(s){return "<input id='f-social-"+s+"' type='text' placeholder='"+s+" URL' value='"+
+        esc((f.social_links||{})[s]||"")+"' style='margin-bottom:8px;'>";}).join("")+"</div></div>";
+  }
+
+  function collectProfileFields(){
+    var payload={
+      name:$("#f-name").value.trim(),
+      country:$("#f-country").value.trim()||null,
+      age:$("#f-age").value===""?null:Number($("#f-age").value),
+      study_level:$("#f-study").value||null,
+      field:$("#f-field").value.trim()||null,
+      history:$("#f-history").value.trim()||null
     };
-    LIST_FIELDS.forEach(function (field) { payload[field] = readTags($("#tag-" + field)); });
-    var socialLinks = {};
-    SOCIAL_PLATFORMS.forEach(function (platform) {
-      var value = $("#f-social-" + platform).value.trim();
-      if (value) socialLinks[platform] = value;
-    });
-    payload.social_links = socialLinks;
+    LIST_FIELDS.forEach(function(f){payload[f]=readTags(f);});
+    var links={};
+    SOCIAL.forEach(function(s){var el=$("#f-social-"+s); if(el&&el.value.trim()) links[s]=el.value.trim();});
+    payload.social_links=links;
     return payload;
   }
 
-  $("#profile-form").addEventListener("submit", async function (e) {
-    e.preventDefault();
-    var status = $("#profile-status");
-    var btn = $("#save-profile-btn");
-    if (!$("#f-name").value.trim()) {
-      status.textContent = "Name is required.";
-      status.className = "status-line err";
-      return;
-    }
-    btn.disabled = true;
-    status.textContent = "Saving…";
-    status.className = "status-line";
-    try {
-      state.profile = await api("/profile", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildProfilePayload())
-      });
-      status.textContent = "Saved.";
-      status.className = "status-line ok";
-      loadMatches();
-    } catch (err) {
-      status.textContent = err.message;
-      status.className = "status-line err";
-    } finally {
-      btn.disabled = false;
-    }
-  });
-
-  // ---------- discovery ----------
-  $("#discover-btn").addEventListener("click", async function () {
-    var btn = $("#discover-btn");
-    var status = $("#discover-status");
-    btn.disabled = true;
-    var startedAt = Date.now();
-    btn.innerHTML = "<span class=\"spinner\"></span>Searching…";
-    var ticker = setInterval(function () {
-      status.textContent = "Fetching and verifying results… (" + Math.round((Date.now() - startedAt) / 1000) + "s)";
-      status.className = "status-line";
-    }, 1000);
-    try {
-      var result = await api("/discover", { method: "POST" });
-      clearInterval(ticker); // before setting the final message - the ticker would otherwise
-      status.textContent = "Found " + result.found + ", added " + result.added + " new."; // race the
-      status.className = "status-line ok";                                                // await below
-      await loadMatches();
-    } catch (err) {
-      clearInterval(ticker);
-      status.textContent = err.message;
-      status.className = "status-line err";
-    } finally {
-      clearInterval(ticker);
-      btn.disabled = false;
-      btn.textContent = "Run discovery";
-    }
-  });
-
-  $("#runs-toggle").addEventListener("click", async function () {
-    var panel = $("#runs-panel");
-    var opening = panel.style.display !== "block";
-    panel.style.display = opening ? "block" : "none";
-    if (!opening) return;
-    try {
-      var runs = await api("/runs");
-      var body = $("#runs-table tbody");
-      body.innerHTML = "";
-      if (!runs.length) {
-        body.innerHTML = "<tr><td colspan='5' class='empty'>No discovery runs yet.</td></tr>";
-        return;
-      }
-      runs.forEach(function (run) {
-        var tr = document.createElement("tr");
-        tr.innerHTML = "<td>" + esc((run.started_at || "").replace("T", " ").slice(0, 19)) + "</td>" +
-          "<td>" + run.queries.length + "</td><td>" + run.found + "</td><td>" + run.added + "</td>" +
-          "<td>" + run.failures.length + "</td>";
-        body.appendChild(tr);
-      });
-    } catch (err) {
-      showError("Could not load run history: " + err.message);
-    }
-  });
-
-  $("#digest-toggle").addEventListener("click", async function () {
-    var panel = $("#digest-panel");
-    var opening = panel.style.display !== "block";
-    panel.style.display = opening ? "block" : "none";
-    if (!opening) return;
-    try {
-      var digest = await api("/digest");
-      panel.innerHTML = renderDigest(digest.content);
-    } catch (err) {
-      showError("Could not load digest: " + err.message);
-    }
-  });
-
-  function renderDigest(text) {
-    var lines = esc(text).split("\n");
-    var html = "";
-    lines.forEach(function (line) {
-      if (/^## /.test(line)) { html += "<h3>" + line.replace(/^## /, "") + "</h3>"; return; }
-      var bold = line.replace(/^- \*\*(.*?)\*\*/, "<li><strong>$1</strong>");
-      if (bold !== line) { html += bold + "</li>"; return; }
-      if (line.trim() === "") { html += ""; return; }
-      html += "<div>" + line + "</div>";
+  function wireProfileForm(full){
+    $("#profile-form").addEventListener("submit",async function(e){
+      e.preventDefault();
+      var status=$("#profile-status");
+      if(!$("#f-name").value.trim()){ status.textContent="Your name is required."; status.className="status err"; return; }
+      status.textContent="Saving…"; status.className="status";
+      try{
+        await api("/profiles/"+full.id,{method:"PUT",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({display_name:$("#f-display").value.trim()||full.display_name,
+                               fields:collectProfileFields()})});
+        status.textContent="Saved."; status.className="status ok";
+        await loadProfiles(); renderSwitcher();
+      }catch(err){ status.textContent=err.message; status.className="status err"; }
     });
-    return html.replace(/(https?:\/\/[^\s<]+)/g, "<a href=\"$1\" target=\"_blank\" rel=\"noopener\">$1</a>");
   }
 
-  // ---------- opportunities ----------
-  $all(".tab", $("#filter-tabs")).forEach(function (tab) {
-    tab.addEventListener("click", function () {
-      $all(".tab", $("#filter-tabs")).forEach(function (t) { t.classList.remove("active"); });
-      tab.classList.add("active");
-      state.filter = tab.dataset.filter;
-      renderOpportunities();
-    });
-  });
-
-  async function loadMatches() {
-    try {
-      state.matches = await api("/matches");
-      renderOpportunities();
-    } catch (err) {
-      if (err.message.indexOf("409") !== -1) {
-        $("#opportunities-list").innerHTML = "<p class='empty'>Save a profile above to see matched opportunities.</p>";
-      } else {
-        showError("Could not load opportunities: " + err.message);
-      }
-    }
-  }
-
-  function passesFilter(item) {
-    if (state.filter === "all") return true;
-    if (state.filter === "shortlisted") return item.decision === "shortlisted";
-    return item.match.status === state.filter;
-  }
-
-  function truncate(text, max) {
-    if (!text) return "";
-    var clean = text.length > max ? text.slice(0, max) + "…" : text;
-    return clean;
-  }
-
-  function renderOpportunities() {
-    var list = $("#opportunities-list");
-    var visible = state.matches.filter(function (item) { return item.decision !== "dismissed" || state.filter === "all"; })
-      .filter(passesFilter);
-    if (!state.matches.length) {
-      list.innerHTML = "<p class='empty'>No opportunities yet. Run discovery above.</p>";
-      return;
-    }
-    if (!visible.length) {
-      list.innerHTML = "<p class='empty'>Nothing matches this filter.</p>";
-      return;
-    }
-    list.innerHTML = "";
-    visible.forEach(function (item) { list.appendChild(renderCard(item)); });
-  }
-
-  function renderCard(item) {
-    var opp = item.opportunity;
-    var match = item.match;
-    var card = document.createElement("article");
-    card.className = "opportunity" + (item.decision === "dismissed" ? " dismissed" : "");
-    card.dataset.id = item.id;
-
-    var reasons = match.status === "eligible" ? match.matched_requirements : match.failed_requirements.concat(match.unknown_requirements);
-    var reasonsHtml = reasons.length
-      ? "<p class='reasons" + (match.status === "eligible" ? "" : " blockers") + "'><strong>" +
-        (match.status === "eligible" ? "Matches: " : "Review: ") + esc(reasons.join("; ")) + "</strong></p>"
-      : "";
-
-    var evidenceRaw = (opp.evidence && opp.evidence[0]) || "";
-    var short = truncate(evidenceRaw, 280);
-    var evidenceHtml = evidenceRaw
-      ? "<p class='evidence-preview' data-full='" + esc(evidenceRaw).replace(/'/g, "&#39;") + "' data-short='" +
-        esc(short).replace(/'/g, "&#39;") + "'>" + esc(short) + "</p>" +
-        (evidenceRaw.length > 280 ? "<button type='button' class='evidence-toggle'>Show full evidence</button>" : "")
-      : "<p class='meta'>Evidence pending review.</p>";
-
-    card.innerHTML =
-      "<div class='opp-head'><h3><a href='" + esc(opp.url) + "' target='_blank' rel='noopener'>" + esc(opp.title) + "</a></h3>" +
-      "<span class='badge " + esc(match.status) + "'>" + esc(match.status.replace("_", " ")) + "</span></div>" +
-      "<p class='meta'>" + esc(opp.source) + " &middot; score " + match.score +
-      (item.decision ? "<span class='decision-tag'>" + esc(item.decision) + "</span>" : "") +
-      (item.usefulness ? "<span class='decision-tag'>" + esc(item.usefulness) + "</span>" : "") + "</p>" +
-      "<p class='meta'>Deadline: " + esc(opp.deadline || "Not specified") + "</p>" +
-      reasonsHtml + evidenceHtml +
-      "<div class='opp-actions'>" +
-      "<button type='button' class='btn small package-toggle'>View application package</button>" +
-      "<button type='button' class='btn small ghost feedback-btn' data-decision='shortlisted'>Shortlist</button>" +
-      "<button type='button' class='btn small danger feedback-btn' data-decision='dismissed'>Dismiss</button>" +
-      "<button type='button' class='btn small ghost feedback-btn' data-decision='useful'>Useful</button>" +
-      "<button type='button' class='btn small ghost feedback-btn' data-decision='not_useful'>Not useful</button>" +
-      "</div><div class='package-panel'></div>";
-
-    // Re-renders happen on every feedback click (renderOpportunities rebuilds
-    // all cards from state.matches) - restore this card's package panel to
-    // whatever state it was in before the rebuild, instead of always
-    // starting collapsed.
-    if (state.openPackages[item.id]) {
-      var restoredPanel = $(".package-panel", card);
-      restoredPanel.style.display = "block";
-      restoredPanel.innerHTML = state.packageHtml[item.id] || "Loading…";
-    }
-
-    var evidenceToggle = $(".evidence-toggle", card);
-    if (evidenceToggle) {
-      var expanded = false;
-      evidenceToggle.addEventListener("click", function () {
-        var p = $(".evidence-preview", card);
-        expanded = !expanded;
-        p.textContent = expanded ? p.dataset.full.replace(/&#39;/g, "'") : p.dataset.short.replace(/&#39;/g, "'");
-        evidenceToggle.textContent = expanded ? "Show less" : "Show full evidence";
-      });
-    }
-
-    $(".package-toggle", card).addEventListener("click", function () { togglePackage(item.id, card); });
-    $all(".feedback-btn", card).forEach(function (btn) {
-      btn.addEventListener("click", function () { sendFeedback(item.id, btn.dataset.decision, card); });
+  function wireDocuments(profileId){
+    var uploadBtn=$("#doc-upload-btn");
+    if(uploadBtn) uploadBtn.addEventListener("click",async function(){
+      var input=$("#doc-file"); var status=$("#doc-status");
+      if(!input.files.length){ status.textContent="Choose a file first."; status.className="status err"; return; }
+      var form=new FormData(); form.append("file",input.files[0]);
+      uploadBtn.disabled=true; status.textContent="Uploading…"; status.className="status";
+      try{
+        await fetch("/profiles/"+profileId+"/documents",{method:"POST",body:form}).then(function(r){
+          if(!r.ok) return r.json().then(function(b){throw new Error(b.detail||"Upload failed");});
+        });
+        status.textContent="Uploaded."; status.className="status ok";
+        renderRoute();
+      }catch(err){ status.textContent=err.message; status.className="status err"; }
+      finally{ uploadBtn.disabled=false; }
     });
 
-    return card;
-  }
-
-  async function togglePackage(id, card) {
-    var panel = $(".package-panel", card);
-    var opening = panel.style.display !== "block";
-    panel.style.display = opening ? "block" : "none";
-    state.openPackages[id] = opening;
-    if (!opening || state.packageHtml[id]) return;
-    panel.innerHTML = "Loading…";
-    try {
-      var pkg = await api("/opportunities/" + id + "/package");
-      var checklist = pkg.checklist.map(function (i) { return "<li><strong>" + esc(i.status) + "</strong>: " + esc(i.requirement) + "</li>"; }).join("");
-      var warnings = pkg.warnings.length ? pkg.warnings.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") : "<li>None</li>";
-      var html = "<strong>Checklist</strong><ul>" + checklist + "</ul>" +
-        "<strong>Draft cover note</strong><pre>" + esc(pkg.cover_note) + "</pre>" +
-        "<strong>Warnings</strong><ul>" + warnings + "</ul>";
-      panel.innerHTML = html;
-      state.packageHtml[id] = html;
-    } catch (err) {
-      panel.innerHTML = "<span class='status-line err'>" + esc(err.message) + "</span>";
-    }
-  }
-
-  async function sendFeedback(id, decision, card) {
-    try {
-      var result = await api("/opportunities/" + id + "/feedback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision: decision })
+    $all("[data-extract]").forEach(function(b){
+      b.addEventListener("click",async function(){
+        b.disabled=true; b.innerHTML="<span class='spinner'></span>Reading…";
+        try{
+          await api("/profiles/"+profileId+"/documents/"+b.dataset.extract+"/extract",{method:"POST"});
+          renderRoute();
+        }catch(err){ showError(err.message); b.disabled=false; b.textContent="Read it"; }
       });
-      var item = state.matches.filter(function (m) { return m.id === id; })[0];
-      if (item) {
-        if (decision === "shortlisted" || decision === "dismissed") item.decision = result.decision;
-        else item.usefulness = result.usefulness;
+    });
+    $all("[data-deldoc]").forEach(function(b){
+      b.addEventListener("click",async function(){
+        b.disabled=true;
+        try{ await api("/profiles/"+profileId+"/documents/"+b.dataset.deldoc,{method:"DELETE"}); renderRoute(); }
+        catch(err){ showError(err.message); b.disabled=false; }
+      });
+    });
+  }
+
+  // ---------------- notifications ----------------
+  async function renderNotifications(){
+    await loadNotifications();
+    var body = state.notifications.length
+      ? state.notifications.map(function(n){
+          return "<div class='notif"+(n.read_at?"":" unread")+"'>"+esc(n.message)+
+            "<div class='when'>"+new Date(n.created_at).toLocaleString()+"</div></div>";
+        }).join("")
+      : "<div class='empty'>No notifications yet.</div>";
+    $("#view-root").innerHTML =
+      "<h1 class='view-title'>Notifications</h1>"+
+      "<p class='view-sub'>What the agent did while you were away.</p>"+
+      "<section class='panel'>"+body+"</section>"+
+      (state.notifications.some(function(n){return !n.read_at;})
+        ? "<button class='btn plain' id='mark-all-read' type='button'>Mark all as read</button>" : "");
+    var mark=$("#mark-all-read");
+    if(mark) mark.addEventListener("click",async function(){
+      mark.disabled=true;
+      var unread=state.notifications.filter(function(n){return !n.read_at;});
+      for(var i=0;i<unread.length;i++){
+        try{ await api("/notifications/"+unread[i].id+"/read",{method:"POST"}); }catch(e){}
       }
-      renderOpportunities();
-    } catch (err) {
-      showError("Could not record feedback: " + err.message);
-    }
+      await loadNotifications(); renderRoute();
+    });
   }
 
-  // ---------- auth gate ----------
-  function showApp() {
-    $("#auth-section").hidden = true;
-    $("#profile-section").hidden = false;
-    $("#actions-section").hidden = false;
-    $("#opportunities-section").hidden = false;
-    $("#logout-btn").hidden = false;
-    loadProfile().then(loadMatches);
+  // ---------------- onboarding ----------------
+  var onboarding={step:1, chosen:[], createdId:null};
+
+  async function renderOnboarding(){
+    var existing = state.profiles.map(function(p){return p.profile_type;});
+    if(onboarding.step===1) return renderOnboardStep1(existing);
+    if(onboarding.step===2) return renderOnboardStep2();
+    return renderOnboardStep3();
   }
 
-  function showAuth() {
-    $("#auth-section").hidden = false;
-    $("#profile-section").hidden = true;
-    $("#actions-section").hidden = true;
-    $("#opportunities-section").hidden = true;
-    $("#logout-btn").hidden = true;
+  function stepBar(n){
+    var labels=["Choose what to look for","Tell it about you","Let it start"];
+    return "<div class='steps'>"+labels.map(function(l,i){
+      var cls = n===i+1 ? "step active" : (n>i+1 ? "step done" : "step");
+      return "<div class='"+cls+"'>"+(i+1)+". "+esc(l)+"</div>";
+    }).join("")+"</div>";
   }
 
-  async function checkAuth() {
-    try {
-      await api("/me");
-      showApp();
-    } catch (err) {
-      showAuth();
-    }
-  }
+  function renderOnboardStep1(existing){
+    var available=TYPES.filter(function(t){return existing.indexOf(t.id)===-1;});
+    if(!available.length){ location.hash="#/dashboard"; return; }
+    $("#view-root").innerHTML =
+      "<h1 class='view-title'>"+(state.profiles.length?"Add another profile":"Welcome to OpportunityAI")+"</h1>"+
+      "<p class='view-sub'>Each profile is searched separately with its own documents, so your scholarship "+
+      "hunt never gets mixed up with your company's tenders.</p>"+
+      stepBar(1)+
+      "<section class='panel'><h2>What should this profile look for?</h2>"+
+      "<div class='type-pick'>"+available.map(function(t){
+        return "<button type='button' class='type-card' data-type='"+t.id+"'><strong>"+esc(t.name)+
+          "</strong><span>"+esc(t.blurb)+"</span></button>";}).join("")+"</div>"+
+      "<div class='row' style='margin-top:20px;'><button class='btn' id='ob-next' type='button' disabled>Continue</button>"+
+      "<span class='status' id='ob-status'></span></div></section>";
 
-  $("#login-form").addEventListener("submit", async function (e) {
-    e.preventDefault();
-    var status = $("#login-status");
-    status.textContent = "Logging in…";
-    status.className = "status-line";
-    try {
-      await api("/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: $("#login-email").value.trim(),
-          password: $("#login-password").value
-        })
+    var picked=null;
+    $all(".type-card").forEach(function(card){
+      card.addEventListener("click",function(){
+        $all(".type-card").forEach(function(c){c.classList.remove("selected");});
+        card.classList.add("selected"); picked=card.dataset.type; $("#ob-next").disabled=false;
       });
-      status.textContent = "";
-      showApp();
-    } catch (err) {
-      status.textContent = err.message;
-      status.className = "status-line err";
-    }
-  });
+    });
+    $("#ob-next").addEventListener("click",async function(){
+      var b=$("#ob-next"); b.disabled=true; b.innerHTML="<span class='spinner'></span>Creating…";
+      try{
+        var created=await api("/profiles",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({profile_type:picked, display_name:typeName(picked)})});
+        onboarding.createdId=created.id; onboarding.step=2;
+        await loadProfiles();
+        state.activeProfileId=created.id;
+        try{ localStorage.setItem("activeProfileId",created.id); }catch(e){}
+        renderSwitcher(); renderRoute();
+      }catch(err){
+        $("#ob-status").textContent=err.message; $("#ob-status").className="status err";
+        b.disabled=false; b.textContent="Continue";
+      }
+    });
+  }
 
-  $("#register-form").addEventListener("submit", async function (e) {
+  async function renderOnboardStep2(){
+    var full=await api("/profiles/"+onboarding.createdId);
+    $("#view-root").innerHTML =
+      "<h1 class='view-title'>Tell it about you</h1>"+
+      "<p class='view-sub'>This is what it searches with. You can upload a CV on the next screen and let it "+
+      "fill in the rest — for now, your name is the only thing it can't work without.</p>"+
+      stepBar(2)+
+      "<section class='panel'><form id='profile-form'>"+profileFields(full,full.fields||{})+
+      "<div class='row' style='margin-top:18px;'><button class='btn' type='submit'>Save and continue</button>"+
+      "<span class='status' id='profile-status'></span></div></form></section>";
+
+    $("#profile-form").addEventListener("submit",async function(e){
+      e.preventDefault();
+      var status=$("#profile-status");
+      if(!$("#f-name").value.trim()){ status.textContent="Your name is required."; status.className="status err"; return; }
+      status.textContent="Saving…"; status.className="status";
+      try{
+        await api("/profiles/"+full.id,{method:"PUT",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({display_name:$("#f-display").value.trim()||full.display_name,
+                               fields:collectProfileFields()})});
+        await loadProfiles(); renderSwitcher();
+        onboarding.step=3; renderRoute();
+      }catch(err){ status.textContent=err.message; status.className="status err"; }
+    });
+  }
+
+  function renderOnboardStep3(){
+    $("#view-root").innerHTML =
+      "<h1 class='view-title'>You're set up</h1>"+
+      "<p class='view-sub'>From here the agent works on its own.</p>"+
+      stepBar(3)+
+      "<section class='panel'><h2>What happens next</h2>"+
+      "<p class='muted'>It searches on a schedule using your profile, checks every result against your "+
+      "eligibility, and writes a full application for anything you qualify for. You'll get a notification "+
+      "when something is ready.</p>"+
+      "<p class='muted'>You only ever step in to read a finished draft and approve it. It does not submit "+
+      "anything on your behalf — you send it yourself from the portal, with everything already written.</p>"+
+      "<div class='row' style='margin-top:18px;'>"+
+      "<button class='btn' id='ob-finish' type='button'>Go to dashboard</button>"+
+      "<a class='btn plain' href='#/profile'>Upload a CV first</a></div></section>";
+    $("#ob-finish").addEventListener("click",function(){ onboarding.step=1; location.hash="#/dashboard"; });
+  }
+
+  // ---------------- bootstrap ----------------
+  async function loadProfiles(){
+    state.profiles = await api("/profiles");
+    var saved=null;
+    try{ saved=localStorage.getItem("activeProfileId"); }catch(e){}
+    var ids=state.profiles.map(function(p){return p.id;});
+    state.activeProfileId = (saved && ids.indexOf(saved)!==-1) ? saved : (ids[0]||null);
+  }
+  async function loadNotifications(){
+    try{ state.notifications = await api("/notifications"); }catch(e){ state.notifications=[]; }
+    renderBadges();
+  }
+
+  function showApp(){ $("#auth-view").hidden=true; $("#app-shell").hidden=false; }
+  function showAuth(){ $("#app-shell").hidden=true; $("#auth-view").hidden=false; }
+
+  async function enterApp(){
+    showApp();
+    await loadProfiles();
+    renderSwitcher();
+    await loadNotifications();
+    if(!state.profiles.length){ onboarding.step=1; location.hash="#/onboarding"; }
+    renderRoute();
+  }
+
+  async function checkAuth(){
+    try{ state.account = await api("/me"); await enterApp(); }
+    catch(err){ showAuth(); }
+  }
+
+  $("#login-form").addEventListener("submit",async function(e){
     e.preventDefault();
-    var status = $("#register-status");
-    status.textContent = "Registering…";
-    status.className = "status-line";
-    try {
-      await api("/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: $("#register-email").value.trim(),
-          password: $("#register-password").value
-        })
-      });
-      status.textContent = "";
-      showApp();
-    } catch (err) {
-      status.textContent = err.message;
-      status.className = "status-line err";
-    }
+    var s=$("#login-status"); s.textContent="Logging in…"; s.className="status";
+    try{
+      await api("/login",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({email:$("#login-email").value.trim(),password:$("#login-password").value})});
+      s.textContent=""; await checkAuth();
+    }catch(err){ s.textContent=err.message; s.className="status err"; }
   });
-
-  $("#show-register-btn").addEventListener("click", function () {
-    $("#login-form").hidden = true;
-    $("#register-toggle-row").hidden = true;
-    $("#register-form").hidden = false;
-    $("#auth-heading").textContent = "Register";
+  $("#register-form").addEventListener("submit",async function(e){
+    e.preventDefault();
+    var s=$("#register-status"); s.textContent="Creating account…"; s.className="status";
+    try{
+      await api("/register",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({email:$("#register-email").value.trim(),password:$("#register-password").value})});
+      s.textContent=""; await checkAuth();
+    }catch(err){ s.textContent=err.message; s.className="status err"; }
   });
-
-  $("#show-login-btn").addEventListener("click", function () {
-    $("#register-form").hidden = true;
-    $("#login-form").hidden = false;
-    $("#register-toggle-row").hidden = false;
-    $("#auth-heading").textContent = "Log in";
+  $("#show-register-btn").addEventListener("click",function(){
+    $("#login-form").hidden=true; $("#auth-toggle-row").hidden=true;
+    $("#register-form").hidden=false; $("#auth-toggle-back").hidden=false;
+    $("#auth-heading").textContent="Create your account";
   });
-
-  $("#logout-btn").addEventListener("click", async function () {
-    try {
-      await api("/logout", { method: "POST" });
-    } catch (err) {
-      // ignore - we're logging out regardless
-    }
+  $("#show-login-btn").addEventListener("click",function(){
+    $("#register-form").hidden=true; $("#auth-toggle-back").hidden=true;
+    $("#login-form").hidden=false; $("#auth-toggle-row").hidden=false;
+    $("#auth-heading").textContent="Log in";
+  });
+  $("#logout-btn").addEventListener("click",async function(){
+    try{ await api("/logout",{method:"POST"}); }catch(e){}
+    state=({account:null,profiles:[],activeProfileId:null,notifications:[],opportunities:[],summary:null});
     showAuth();
   });
 
