@@ -22,6 +22,7 @@ class ObjectStoreClient(Protocol):
     def bucket_exists(self, bucket_name: str) -> bool: ...
     def make_bucket(self, bucket_name: str) -> None: ...
     def put_object(self, bucket_name: str, object_name: str, data, length: int, content_type: str): ...
+    def get_object(self, bucket_name: str, object_name: str): ...
     def presigned_get_object(self, bucket_name: str, object_name: str, expires: timedelta): ...
     def remove_object(self, bucket_name: str, object_name: str) -> None: ...
 
@@ -56,6 +57,15 @@ def upload_document(
     key = object_key(account_id, profile_id, document_id, filename)
     client.put_object(bucket, key, BytesIO(content), length=len(content), content_type=content_type)
     return key
+
+
+def download_document(client: ObjectStoreClient, key: str, *, bucket: str = DEFAULT_BUCKET) -> bytes:
+    response = client.get_object(bucket, key)
+    try:
+        return response.read()
+    finally:
+        response.close()
+        response.release_conn()
 
 
 def presigned_url(

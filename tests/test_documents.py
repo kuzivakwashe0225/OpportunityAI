@@ -4,11 +4,28 @@ import pytest
 
 from opportunity_agent.documents import (
     delete_document,
+    download_document,
     ensure_bucket,
     object_key,
     presigned_url,
     upload_document,
 )
+
+
+class _FakeHTTPResponse:
+    def __init__(self, data: bytes):
+        self._data = data
+        self.closed = False
+        self.released = False
+
+    def read(self):
+        return self._data
+
+    def close(self):
+        self.closed = True
+
+    def release_conn(self):
+        self.released = True
 
 
 class FakeMinioClient:
@@ -18,6 +35,7 @@ class FakeMinioClient:
         self.buckets = set(existing_buckets or [])
         self.objects = {}  # (bucket, key) -> (data, content_type)
         self.presign_calls = []
+        self.last_response = None
 
     def bucket_exists(self, bucket_name):
         return bucket_name in self.buckets
@@ -27,6 +45,11 @@ class FakeMinioClient:
 
     def put_object(self, bucket_name, object_name, data, length, content_type="application/octet-stream", **kwargs):
         self.objects[(bucket_name, object_name)] = (data.read(), content_type)
+
+    def get_object(self, bucket_name, object_name, **kwargs):
+        data, _content_type = self.objects[(bucket_name, object_name)]
+        self.last_response = _FakeHTTPResponse(data)
+        return self.last_response
 
     def presigned_get_object(self, bucket_name, object_name, expires=timedelta(days=7), **kwargs):
         self.presign_calls.append((bucket_name, object_name, expires))
@@ -88,6 +111,31 @@ def test_presigned_url_delegates_with_the_given_bucket_and_expiry():
 
     assert url == "https://minio.local/docs/acct-1/profile-1/doc-1/cv.pdf?presigned=1"
     assert client.presign_calls == [("docs", "acct-1/profile-1/doc-1/cv.pdf", timedelta(minutes=15))]
+
+
+def test_download_document_returns_the_stored_bytes():
+    client = FakeMinioClient(existing_buckets={"docs"})
+    key = upload_document(
+        client, account_id="a", profile_id="p", document_id="d",
+        filename="cv.pdf", content=b"the actual document bytes", content_type="application/pdf", bucket="docs",
+    )
+
+    content = download_document(client, key, bucket="docs")
+
+    assert content == b"the actual document bytes"
+
+
+def test_download_document_closes_and_releases_the_response():
+    client = FakeMinioClient(existing_buckets={"docs"})
+    key = upload_document(
+        client, account_id="a", profile_id="p", document_id="d",
+        filename="cv.pdf", content=b"data", content_type="application/pdf", bucket="docs",
+    )
+
+    download_document(client, key, bucket="docs")
+
+    assert client.last_response.closed
+    assert client.last_response.released
 
 
 def test_delete_document_removes_the_object():
