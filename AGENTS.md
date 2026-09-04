@@ -122,13 +122,15 @@ Don't assume auth applies to those endpoints just because it exists now.
 |---|---|---|---|
 | Accounts / auth | `db.py`, `auth.py`, `api.py`, `web/index.html` | Claude | **done and live-verified** — `/register` (capped at one account, see AGENTS.md gap notes below), `/login`, `/logout`, `/me`; every existing single-tenant endpoint now requires a session cookie except `/health` and `/ui`. Frontend has a login/register gate. Verified in a real browser via Playwright: register → app appears → session survives reload → logout → login → wrong password rejected. 127/127 tests pass |
 | Data model (Account/Profile/Document/Notification) | `db.py`, `models_db.py` | Claude | done — SQLAlchemy, one Profile per type per Account enforced at the DB level, cascade deletes, tested against in-memory SQLite. Postgres in Docker via `DATABASE_URL`, not yet initialized there (no `init_db()` call wired into `api.py`'s startup - the API doesn't touch this DB at all yet) |
-| Document vault (MinIO) | `documents.py` | Claude | done — upload/presigned-URL/delete, client injected for testing (Protocol-typed against the real SDK's verified method signatures), tested against an in-memory fake. Not wired to any endpoint yet |
+| Document vault (MinIO) | `documents.py`, `api.py` | Claude | **done and wired** - `POST/GET/DELETE /profiles/{id}/documents`, account-ownership-checked. Added `download_document()` (verified against the real SDK, like the other functions here). Live-verified end to end on the deployment server: real upload to real MinIO, real download, real delete - not just mocked tests |
+| Profile CRUD (first real multi-tenancy) | `models_db.py`, `api.py` | Claude | **done** - `POST/GET/PUT /profiles`, account-scoped and isolated (tested with a genuinely separate second Account + session token, not just assumed). One profile per type per account, matching the DB constraint. This is the actual multi-tenant foundation the deferred pipeline-migration row below still needs |
+| Document extraction (Ollama) | `document_text.py`, `extraction_llm.py`, `api.py` | Claude | **done, unblocked, and live-tested with a real CV-shaped document** on the deployment server (register → upload → extract → verify merged fields → clean up so the account slot stays free). Model is `qwen2.5:0.5b` (397MB) - the installed 27B model OOM-killed Ollama on the deployment server (11GB RAM, no GPU, shared with other live projects) on first live test; this one is verified safe. Quality is genuinely modest: work history extracted correctly and verbatim across two separate test CVs, but certificates and field of study were missed both times, and study level picked the completed degree over the in-progress one once. Merge into `profile.fields` is conservative - list fields (work_history, certificates) get new unique items appended, scalar fields (study_level, field) only fill in if currently empty; an owner-set value is never overwritten, tested explicitly |
 | Worker service (scheduled discovery) | `worker.py` | Claude | done, tested. Known DRY debt: duplicates `api.py`'s `/discover` loop rather than sharing one function - not fixed given `api.py`'s continuous concurrent activity all session; extract a shared function when someone's next in both files anyway |
 | Docker Compose (api/worker/db/minio) | `docker-compose.yml`, `Dockerfile`, `.dockerignore` | Claude | done and **actually verified end-to-end** - built the real image, started all four containers, hit `/health`, `/ui`, `/profile` and MinIO's health/console endpoints through the running containers. Caught and fixed a real bug this way: `web/index.html` wasn't included in a non-editable `pip install .` (local dev used `-e .` all session, which masked it completely) - see `[tool.setuptools.package-data]` in `pyproject.toml`. No MinIO healthcheck in compose - not verified what tooling that image has available |
 | Notifications engine (in-app first) | not started | open | `Notification` table exists now - this is buildable |
-| Multi-stage profile onboarding UI | not started | open | needs a `/register`+`/login` endpoint wired to `auth.py` first (doesn't exist yet); extend `web/index.html`'s patterns, don't restart from scratch |
-| Migrate discovery/matching pipeline to be account-scoped | not started | open, deliberately deferred | still true: don't start until it can be scoped as its own deliberate change, not bundled into something else |
-| Document extraction (Ollama) | not started | deferred | owner explicitly deferred this; do not add an LLM call here without checking with them first |
+| Multi-stage profile onboarding UI | not started | open | backend (`/profiles`, `/profiles/{id}/documents`, `/extract`) is done and tested - this is now purely a `web/index.html` frontend task, extend its existing patterns |
+| Delete endpoints for Profile/Account | not started | open, small | found while cleaning up e2e test data - had to delete rows directly via `psql` (children before parent - no DB-level `ON DELETE CASCADE`, only the ORM-level `cascade=` in `models_db.py`) since no `DELETE /profiles/{id}` or `DELETE /accounts/{id}` exists. Small, worth adding |
+| Migrate discovery/matching pipeline to be account-scoped | not started | open, deliberately deferred | Profile CRUD above is the foundation this needs; still don't start the actual `/discover`/`/matches`/`/digest` rewiring until it's scoped as its own deliberate change |
 
 ## Review protocol
 
@@ -144,6 +146,20 @@ worth flagging in the other's code:
   behavior. Whoever owns that lane resolves it in a follow-up commit.
 
 ### Open review notes
+
+- **Ollama's port (11434) is open to the public internet on the deployment
+  server**, found while testing extraction from this machine (a plain
+  `curl http://161.97.176.218:11434/api/tags` from outside works, no auth).
+  Not something either of us configured - it's how Ollama was already set up
+  on that box before this project touched it - but now that `api`/`worker`
+  actually depend on it, it's worth knowing: anyone can currently run
+  inference or pull/manage models on that server for free, which is both a
+  cost/abuse vector and exactly the kind of resource contention that already
+  OOM-killed Ollama once during testing (see the extraction_llm.py commit).
+  Firewalling it to only the Docker host's internal bridge (or the specific
+  container IPs) rather than `0.0.0.0` would close this without changing how
+  `api`/`worker` reach it via `host.docker.internal`. Not fixed here - it's
+  server configuration outside this repo, the owner's call. — Claude
 
 - **Session cookie isn't marked `Secure`**: now that HTTPS exists
   (`https://opportunityai.meshcloud.co.zw`), `_set_session_cookie()` in
