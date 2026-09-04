@@ -21,15 +21,25 @@ agents divide and hand off work*, not what the product is.
 
 ## Live deployment
 
-Running at **http://161.97.176.218:8000/ui** as of 3 September — `docker compose`
-on the owner's own server (`~/apps/OpportunityAI`, GitHub remote
-`kuzivakwashe0225/OpportunityAI`), alongside several other unrelated live
-projects on that box (do not assume it's a dedicated machine). Ports 80/443
-are already taken by an existing reverse proxy serving those other projects -
-deliberately not touched; this deploys on port 8000 directly rather than
-routing through it. Postgres and MinIO are not published to the host except
-MinIO's own ports (9000/9001, needed for presigned URLs to work from outside
-the Docker network) - Postgres stays internal-only.
+Running at **https://opportunityai.meshcloud.co.zw/ui** (also reachable
+directly at `http://161.97.176.218:8000/ui`, unencrypted - fine for now, see
+review notes) as of 4 September — `docker compose` on the owner's own server
+(`~/apps/OpportunityAI`, GitHub remote `kuzivakwashe0225/OpportunityAI`),
+alongside several other unrelated live projects on that box (do not assume
+it's a dedicated machine: caidev, valerie, agritrack, preciseagric,
+telechaplaincy, ZRRSportal, lionturfportal, panica, pmi.ozzene.com all share
+it). Ports 80/443 are fronted by a host-level **Caddy** instance
+(`/etc/caddy/Caddyfile`, requires root to edit — the deploy SSH user has
+`sudo` but not passwordless) serving all of those; this app was added there
+too (a plain `reverse_proxy 127.0.0.1:8000` block, Caddy gets the TLS cert
+automatically) rather than trying to bind 80/443 itself. **Before ever
+editing that file again**: validate with
+`caddy validate --config <candidate> --adapter caddyfile` first, apply with
+`systemctl reload` (never `restart` — this fronts other people's live
+sites), and spot-check a couple of the *other* domains still respond
+afterward. Postgres and MinIO are not published to the host except MinIO's
+own ports (9000/9001, needed for presigned URLs from outside the Docker
+network) - Postgres stays internal-only.
 
 To ship a change to production: push to `master`, then on the server
 `cd ~/apps/OpportunityAI && git pull && docker compose up -d --build`.
@@ -134,6 +144,14 @@ worth flagging in the other's code:
   behavior. Whoever owns that lane resolves it in a follow-up commit.
 
 ### Open review notes
+
+- **Session cookie isn't marked `Secure`**: now that HTTPS exists
+  (`https://opportunityai.meshcloud.co.zw`), `_set_session_cookie()` in
+  `api.py` should set `secure=True` so the browser never sends it over the
+  still-open plain-HTTP path (`http://161.97.176.218:8000`). Not fixed here -
+  deciding whether to keep the plain-HTTP path open at all (redirect to
+  HTTPS instead?) is a small product call, not just a one-line flag flip. —
+  Claude
 
 - **Auth's single-account cap is an interim safety measure, not the design**:
   `/register` returns 403 once any account exists. This is deliberate given
