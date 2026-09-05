@@ -404,3 +404,96 @@ Two orthogonal axes on an opportunity rather than one overloaded status: `match_
 - **Learning from feedback.** Requested, not yet implemented. Worth being concrete about scale: this system will realistically see tens of opportunities a week and a handful of decisions on them. That is nowhere near enough to train a model, and claiming otherwise would be dishonest. What is achievable and useful at this data volume is explicit, inspectable heuristics — down-weighting sources the owner always dismisses, up-weighting terms that recur in what they approve, adjusting ranking weights from shortlist/dismiss signals — kept as a deterministic layer above the hard eligibility rules (§5.4), never replacing them. The `usefulness` field and decision history already collect the signal; nothing consumes it yet.
 - **Submission automation** (§15), for the reasons above.
 - **Email/push notifications** — in-app only so far; the channel decision still needs a provider.
+
+## 17. Tenders, per-type profiles, and the honest limit of automation
+
+### 17.1 What the profile type now decides
+
+Choosing an opportunity type is not a label on one universal form. `profile_schema.py`
+holds a single table from which the type selects:
+
+* **subject** — is the applicant a person or an organisation
+* **fields** — the questions the setup screen asks
+* **documents** — the paperwork expected, and which of it is non-negotiable
+* **search vocabulary** — the words discovery searches with
+
+Scholarships and jobs are personal. Tenders are organisational. **Grants are
+deliberately either**, because they genuinely go both ways — research grants to
+individuals, funding calls to organisations — so the owner is asked rather than
+having the wrong paperwork demanded of them.
+
+The Zimbabwe tender compliance pack (certificate of incorporation, ITF263 tax
+clearance, PRAZ supplier registration, CR14, company profile) is the set commonly
+demanded by procuring entities on the eGP bulletin board. It is *not* a legal
+minimum, and individual tenders ask for their own extras.
+
+### 17.2 Why tenders don't use web search
+
+Zimbabwe publishes every live government tender openly on the PRAZ eGP bulletin
+board — 884 of them, no login, as structured server-rendered records. Searching the
+open web for what a government register already lists in a table is strictly worse.
+
+More importantly, the board carries the **required supplier category code**, which
+gives tenders the only genuinely hard eligibility rule in this system. Everywhere
+else the engine is inferring eligibility from prose. Here it is checking a fact: a
+company registered under GE001 can bid on GE001 tenders and cannot bid on SV001
+ones. That is why a company's PRAZ codes are the most important field on its profile.
+
+The detail page adds what actually disqualifies a bid — bid security, tender fees,
+bid validity period, and the number of addenda issued since publication. None of
+that is on the listing, and all of it is what bidders get thrown out for missing.
+
+### 17.3 Missing documents are a request, not a rejection
+
+Previously a required document the owner didn't have made an opportunity
+"ineligible", which threw away winnable work in silence. "You do not qualify" and
+"you qualify but I need your tax clearance" are different answers, and only the
+second is fixable by the owner in two minutes.
+
+So documents are now their own dimension. A qualifying opportunity missing a file
+is drafted anyway, parked at stage `needs_documents`, and the owner is asked for
+the paper *by the name written on it*. When it arrives the agent re-checks
+everything waiting without being told — having asked, it has to notice the answer,
+or the opportunity sits blocked until somebody happens to look.
+
+### 17.4 Where automation stops, and why
+
+The agent finds, verifies, decides, drafts, and tells the owner exactly what is
+left. It does not submit. This is a deliberate limit, not an unfinished feature,
+and the reasoning has not changed since §16:
+
+Jobright — funded, roughly nine people, ~$5M ARR, working on nothing but automated
+job applications — still cannot reliably auto-submit. Independent testing describes
+their autopilot as beta-stage and considerably narrower than the marketing; for many
+applications it hands the user back to the employer's own site. That is the ceiling
+reached by a team fully dedicated to the problem.
+
+For eGP specifically there is a harder wall: **the public bulletin board is not the
+bid pack**. Tender documents hang off a supplier-authenticated route, and submitting
+a bid requires a logged-in PRAZ supplier account. Automating that means holding the
+owner's PRAZ credentials, which is a security decision for them to take knowingly —
+not an implementation detail to assume on their behalf.
+
+What *is* buildable next, in order of honesty about effort:
+
+1. **Reading an opportunity page for its forms and downloadable packs** — find the
+   application form, the tender document links, the submission address. Genuinely
+   straightforward, and most of the remaining manual work.
+2. **Filling a downloaded form from profile data** — reliable for a known form,
+   per-form work for anything else.
+3. **Submitting** — per-portal adapters, credentials, and a human confirming each
+   send. Not one feature; a programme of them.
+
+### 17.5 Learning
+
+Still not built, and the reason still holds. This system will see tens of
+opportunities a week and a handful of decisions on them. That is nowhere near enough
+to train a model, and claiming otherwise would be dishonest.
+
+What is achievable is inspectable heuristics sitting *above* the hard eligibility
+rules and never replacing them: down-weight sources whose results are always
+dismissed, up-weight terms that recur in what gets approved, learn which document
+kinds a given procuring entity always asks for. The signal is already being
+collected — `usefulness`, decision history, escalations, and now compliance outcomes.
+Nothing consumes it yet. When something does, it must stay legible: the owner has to
+be able to see *why* the agent ranked something, and overrule it.
