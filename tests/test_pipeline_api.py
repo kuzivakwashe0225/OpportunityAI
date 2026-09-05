@@ -228,3 +228,80 @@ def test_opportunities_of_another_account_are_not_reachable(monkeypatch):
 
     assert client.get(f"/profiles/{profile['id']}/opportunities").status_code == 404
     assert client.get("/notifications").json() == []
+
+
+# ---------------------------------------------------------------------------
+# The setup form and document slots are driven by the profile type
+# ---------------------------------------------------------------------------
+
+def test_a_scholarship_profile_is_asked_person_questions():
+    profile = _profile()
+    schema = client.get(f"/profiles/{profile['id']}/schema").json()
+
+    keys = {f["key"] for f in schema["fields"]}
+    assert schema["subject"] == "individual"
+    assert "study_level" in keys
+    assert "praz_categories" not in keys
+    assert "cv" in {d["key"] for d in schema["documents"]}
+
+
+def test_a_tender_profile_is_asked_company_questions_instead():
+    """The core of the request: choosing tenders must not hand a company the
+    scholarship form."""
+    profile = client.post(
+        "/profiles", json={"profile_type": "tender", "display_name": "Tenders"}
+    ).json()
+    schema = client.get(f"/profiles/{profile['id']}/schema").json()
+
+    keys = {f["key"] for f in schema["fields"]}
+    documents = {d["key"] for d in schema["documents"]}
+
+    assert schema["subject"] == "organisation"
+    assert "praz_categories" in keys
+    assert "study_level" not in keys
+    assert "certificate_of_incorporation" in documents
+    assert "tax_clearance" in documents
+    assert "cv" not in documents
+
+
+def test_the_schema_says_which_papers_are_still_outstanding():
+    profile = client.post(
+        "/profiles", json={"profile_type": "tender", "display_name": "Tenders"}
+    ).json()
+    schema = client.get(f"/profiles/{profile['id']}/schema").json()
+
+    assert "tax_clearance" in schema["missing_documents"]
+    assert all(d["held"] is False for d in schema["documents"])
+
+
+def test_a_grant_profile_can_be_switched_to_a_company_and_its_form_changes():
+    profile = client.post(
+        "/profiles", json={"profile_type": "grant", "display_name": "Grants"}
+    ).json()
+
+    as_person = client.get(f"/profiles/{profile['id']}/schema").json()
+    assert as_person["subject"] == "individual"
+    assert as_person["subject_is_choosable"] is True
+
+    client.put(f"/profiles/{profile['id']}", json={
+        "fields": {"name": "Meshcloud", "subject": "organisation"}
+    })
+    as_company = client.get(f"/profiles/{profile['id']}/schema").json()
+
+    assert as_company["subject"] == "organisation"
+    assert "certificate_of_incorporation" in {d["key"] for d in as_company["documents"]}
+
+
+def test_profile_types_are_listed_for_onboarding():
+    types = {t["key"]: t for t in client.get("/profile-types").json()}
+
+    assert set(types) == {"scholarship", "job", "grant", "tender"}
+    assert types["tender"]["subject"] == "organisation"
+    assert types["grant"]["subject"] == "either"
+
+
+def test_another_account_cannot_read_a_profiles_schema():
+    profile = _profile()
+    client.cookies.clear()
+
+    assert client.get(f"/profiles/{profile['id']}/schema").status_code == 401

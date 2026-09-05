@@ -4,7 +4,7 @@ from pathlib import Path
 
 import jwt
 from dotenv import load_dotenv
-from fastapi import Cookie, Depends, FastAPI, File, Response, UploadFile
+from fastapi import Cookie, Depends, FastAPI, File, Form, Response, UploadFile
 from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
@@ -17,6 +17,7 @@ from . import db as db_module
 from . import documents as documents_module
 from . import models_db
 from . import pipeline as pipeline_module
+from . import profile_schema
 from .digest import build_digest
 from .discovery import build_search_queries, discover
 from .connector import fetch_public_page
@@ -195,6 +196,7 @@ class ProfileOut(BaseModel):
 
 class DocumentOut(BaseModel):
     id: str
+    doc_type: str
     original_filename: str
     content_type: str
     size_bytes: int
@@ -284,6 +286,11 @@ def update_profile(
 async def upload_document(
     profile_id: str,
     file: UploadFile = File(...),
+    # What this paper *is*, from profile_schema. Optional on purpose: the owner
+    # can always upload something the checklist never asked for, and an
+    # unclassified file is still stored and still text-extracted - it just
+    # can't satisfy a named requirement, because we don't know what it is.
+    doc_type: str = Form("other"),
     account: models_db.Account = Depends(get_current_account),
     db: Session = Depends(get_db_session),
 ) -> models_db.Document:
@@ -296,7 +303,8 @@ async def upload_document(
         raise HTTPException(status_code=413, detail="file too large")
 
     document = models_db.Document(
-        profile_id=profile.id, object_key="", original_filename=file.filename or "document",
+        profile_id=profile.id, object_key="", doc_type=(doc_type or "other").strip() or "other",
+        original_filename=file.filename or "document",
         content_type=content_type, size_bytes=len(content),
         # Document.extraction_status defaults to "skipped" (models_db.py predates
         # extraction existing at all). Now that /extract is real, a fresh upload
@@ -315,6 +323,19 @@ async def upload_document(
     )
     document.object_key = key
     db.commit()
+
+    # The agent asked for a document; a document arrived. Check straight away
+    # whether that unblocks anything, rather than leaving drafts sitting in
+    # "needs_documents" until the next scheduled sweep hours later - the owner
+    # is right here, and this is the moment the answer is useful to them.
+    if document.doc_type != "other":
+        db.refresh(profile)
+        try:
+            pipeline_module.resume_after_documents(db, profile)
+        except Exception:
+            # Never fail an upload because the follow-up check failed - the
+            # file is safely stored, and the next sweep will retry this.
+            db.rollback()
     return document
 
 
@@ -326,6 +347,54 @@ def list_documents(
 ) -> list[models_db.Document]:
     profile = _get_owned_profile(profile_id, account, db)
     return db.query(models_db.Document).filter_by(profile_id=profile.id).all()
+
+
+@app.get("/profiles/{profile_id}/schema")
+def get_profile_schema(
+    profile_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> dict:
+    """What this profile type asks for, and what it still owes us.
+
+    The UI renders its setup form and its document slots from this rather than
+    hard-coding a person's fields - which is the whole point of picking a
+    profile type. A company gets company questions and a compliance pack; a
+    student gets a CV and a transcript.
+    """
+    profile = _get_owned_profile(profile_id, account, db)
+    fields = profile.fields or {}
+    held = pipeline_module.held_document_keys(profile)
+    spec = profile_schema.spec_for(profile.profile_type)
+
+    return {
+        "profile_type": profile.profile_type,
+        "label": spec.label,
+        "subject": profile_schema.resolve_subject(profile.profile_type, fields),
+        "subject_is_choosable": spec.subject == profile_schema.EITHER,
+        "fields": [
+            {"key": f.key, "label": f.label, "kind": f.kind, "hint": f.hint,
+             "options": list(f.options)}
+            for f in profile_schema.fields_for(profile.profile_type, fields)
+        ],
+        "documents": [
+            {"key": d.key, "label": d.label, "required": d.required, "hint": d.hint,
+             "held": d.key in held}
+            for d in profile_schema.documents_for(profile.profile_type, fields)
+        ],
+        "missing_documents": sorted(
+            profile_schema.missing_document_keys(profile.profile_type, fields, held)
+        ),
+    }
+
+
+@app.get("/profile-types")
+def list_profile_types() -> list[dict]:
+    """Offered on the onboarding screen. Public: it's what the product is."""
+    return [
+        {"key": s.key, "label": s.label, "subject": s.subject, "blurb": s.blurb}
+        for s in profile_schema.all_specs()
+    ]
 
 
 @app.delete("/profiles/{profile_id}/documents/{document_id}", status_code=204)
@@ -400,6 +469,7 @@ class OpportunityOut(BaseModel):
     stage: str
     escalated: bool
     package: dict | None
+    compliance: dict | None
     created_at: datetime
 
     model_config = {"from_attributes": True}

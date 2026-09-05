@@ -138,7 +138,22 @@
   .type-card{border:2px solid var(--line);background:#fff;border-radius:8px;padding:18px;text-align:left;}
   .type-card.selected{border-color:var(--accent);background:var(--accent-soft);}
   .type-card strong{display:block;font-size:1rem;margin-bottom:5px;color:var(--ink);}
-  .type-card span{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.83rem;color:var(--ink-soft);}
+  .type-card span{display:block;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.83rem;color:var(--ink-soft);}
+  .type-card .who{margin-top:9px;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--accent);}
+  .doc-slot{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);}
+  .doc-slot:last-child{border-bottom:0;}
+  .doc-slot .doc-name{flex:1;min-width:0;}
+  .doc-slot .doc-name strong{display:block;font-size:.92rem;}
+  .doc-slot .doc-name span{font-size:.78rem;color:var(--ink-soft);}
+  .doc-mark{width:20px;height:20px;flex:none;border-radius:50%;display:grid;place-items:center;
+    font-size:.7rem;font-weight:700;color:#fff;background:var(--ink-soft);}
+  .doc-mark.held{background:#1c7c4a;}
+  .doc-mark.needed{background:#b23c17;}
+  .advice{margin:12px 0 0;padding:12px 14px;border-left:3px solid var(--accent);background:var(--accent-soft);
+    border-radius:0 6px 6px 0;}
+  .advice ul{margin:6px 0 0;padding-left:18px;}
+  .advice li{margin:3px 0;font-size:.86rem;}
+  .advice.blocked{border-left-color:#b23c17;background:#fdf1ec;}
 
   /* ---------- documents / notifications ---------- */
   table{width:100%;border-collapse:collapse;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.87rem;}
@@ -231,16 +246,15 @@
   var state = { account:null, profiles:[], activeProfileId:null, notifications:[], opportunities:[], summary:null };
   var LIST_FIELDS = ["documents","interests","goals","certificates","work_history","preferred_countries","preferred_funding","achievements"];
   var SOCIAL = ["linkedin","github","portfolio","twitter"];
-  var TYPES = [
-    {id:"scholarship", name:"Scholarships", blurb:"Degrees, fellowships, funded study."},
-    {id:"job",         name:"Jobs",         blurb:"Employment and career openings."},
-    {id:"grant",       name:"Grants & tenders", blurb:"Funding and contracts for your company."}
-  ];
+  // Loaded from /profile-types rather than hard-coded: the server decides what
+  // kinds of opportunity exist, and what each one asks the owner for. A fourth
+  // type appearing here should not need a frontend change.
+  var TYPES = [];
 
   function $(s,r){return (r||document).querySelector(s);}
   function $all(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s));}
   function esc(s){var d=document.createElement("div");d.textContent=s==null?"":String(s);return d.innerHTML;}
-  function typeName(id){for(var i=0;i<TYPES.length;i++){if(TYPES[i].id===id)return TYPES[i].name;}return id;}
+  function typeName(id){for(var i=0;i<TYPES.length;i++){if(TYPES[i].key===id)return TYPES[i].label;}return id;}
 
   function showError(msg){$("#error-text").textContent=msg;$("#error-banner").style.display="block";}
   $("#error-dismiss").addEventListener("click",function(){$("#error-banner").style.display="none";});
@@ -432,17 +446,29 @@
   // ---------------- review queue ----------------
   async function renderReview(){
     var p=activeProfile(); if(!p){location.hash="#/onboarding";return;}
-    var items=await api("/profiles/"+p.id+"/opportunities?stage=drafted");
-    state.opportunities=items;
+    var drafted=await api("/profiles/"+p.id+"/opportunities?stage=drafted");
+    var waiting=await api("/profiles/"+p.id+"/opportunities?stage=needs_documents");
+    state.opportunities=drafted.concat(waiting);
 
-    var body = items.length
-      ? items.map(oppCard).join("")
+    var body = drafted.length
+      ? drafted.map(oppCard).join("")
       : "<div class='empty'>Nothing waiting. The agent will queue applications here as it finds and drafts them.</div>";
+
+    // Work that is written and qualified but stuck behind a missing file gets
+    // its own section rather than being mixed into the approve queue - it is
+    // asking the owner for something, not asking them to decide something.
+    var blocked = waiting.length
+      ? "<section class='panel'><h2>Waiting on you for documents <span class='muted'>("+waiting.length+")</span></h2>"+
+        "<p class='muted' style='margin:-6px 0 14px;'>You qualify for these and they're already written. "+
+        "They can't be submitted until the paperwork below is in — upload it and they move straight to the "+
+        "queue above.</p>"+waiting.map(oppCard).join("")+"</section>"
+      : "";
 
     $("#view-root").innerHTML =
       "<h1 class='view-title'>Review queue</h1>"+
       "<p class='view-sub'>Applications the agent has already written. Read one, then approve it — "+
-      "approving does not send anything, it marks it ready for you to submit on the portal.</p>"+body;
+      "approving does not send anything, it marks it ready for you to submit on the portal.</p>"+
+      body+blocked;
     wireOppCards();
   }
 
@@ -477,7 +503,10 @@
                  : (o.match_reasons.failed||[]).concat(o.match_reasons.unknown||[]);
     var deadline = opp.deadline || "Not specified";
     var actions = [];
-    if(o.stage==="drafted"){
+    if(o.stage==="needs_documents"){
+      actions.push("<a class='btn small' href='#/profile'>Upload what's missing</a>");
+      actions.push(btn("dismiss","Not interested","btn small danger"));
+    } else if(o.stage==="drafted"){
       actions.push(btn("approve","Approve","btn small"));
       actions.push(btn("dismiss","Not interested","btn small danger"));
     } else if(o.stage==="approved"){
@@ -499,8 +528,27 @@
         (o.escalated?" <span class='pill stage'>pushed through by you</span>":"")+"</p>"+
       (reasons.length? "<p class='reasons'><strong>"+(o.match_status==="eligible"?"Matches":"Blockers")+
         ":</strong> "+esc(reasons.join("; "))+"</p>" : "")+
+      complianceAdvice(o.compliance)+
       "<div class='opp-actions'>"+actions.join("")+"</div>"+
       "<div class='package'>"+(o.package?renderPackage(o.package):"")+"</div></article>";
+  }
+
+  // What to do and what to upload, from compliance.py. Blockers first and in
+  // their own colour: "your PRAZ registration doesn't cover this" is not the
+  // same kind of news as "pay the SPOC fee", and burying one in the other
+  // wastes the owner's time on a bid they cannot enter.
+  function complianceAdvice(c){
+    if(!c) return "";
+    var out="";
+    if((c.blockers||[]).length){
+      out += "<div class='advice blocked'><strong>Can't be submitted as things stand</strong><ul>"+
+        c.blockers.map(function(b){return "<li>"+esc(b)+"</li>";}).join("")+"</ul></div>";
+    }
+    if((c.actions||[]).length){
+      out += "<div class='advice'><strong>Before you can send this</strong><ul>"+
+        c.actions.map(function(a){return "<li>"+esc(a)+"</li>";}).join("")+"</ul></div>";
+    }
+    return out;
   }
   function btn(action,label,cls){
     return "<button type='button' class='"+cls+"' data-act='"+action+"'>"+esc(label)+"</button>";
@@ -545,94 +593,187 @@
     var p=activeProfile(); if(!p){location.hash="#/onboarding";return;}
     var full=await api("/profiles/"+p.id);
     var f=full.fields||{};
+    var schema=await api("/profiles/"+p.id+"/schema");
     var docs=await api("/profiles/"+p.id+"/documents");
+
+    var outstanding = schema.missing_documents.length;
 
     $("#view-root").innerHTML =
       "<h1 class='view-title'>Profile &amp; documents</h1>"+
-      "<p class='view-sub'>The richer this is, the better the agent searches. Everything here is editable — "+
-      "including anything it filled in from your documents.</p>"+
+      "<p class='view-sub'>"+esc(schema.label)+" &mdash; "+
+        (schema.subject==="organisation"
+          ? "your company details and its compliance pack."
+          : "the richer this is, the better the agent searches.")+
+      " Everything here is editable, including what it read out of your documents.</p>"+
       "<section class='panel'><h2>Documents</h2>"+
-      "<p class='muted' style='margin:-6px 0 14px;'>Upload a CV and the agent will read it and fill in what it can. "+
-      "It never overwrites something you typed yourself.</p>"+
-      "<div class='row'><input type='file' id='doc-file' style='flex:1;'>"+
+      (outstanding
+        ? "<div class='advice blocked'><strong>"+outstanding+" required document"+
+          (outstanding===1?" is":"s are")+" still missing.</strong><p class='muted' style='margin:4px 0 0;'>"+
+          "The agent can find and draft work without them, but it can't be submitted until they're here.</p></div>"
+        : "<div class='advice'><strong>Your paperwork is complete.</strong></div>")+
+      "<div style='margin-top:14px;'>"+documentChecklist(schema,docs)+"</div>"+
+      "<div class='row' style='margin-top:18px;'>"+
+      "<input type='file' id='doc-file' style='flex:1;'>"+
+      "<select id='doc-type' style='max-width:250px;'>"+
+        "<option value='other'>Something else</option>"+
+        schema.documents.map(function(d){
+          return "<option value='"+esc(d.key)+"'>"+esc(d.label)+"</option>";}).join("")+
+      "</select>"+
       "<button class='btn small' id='doc-upload-btn' type='button'>Upload</button>"+
       "<span class='status' id='doc-status'></span></div>"+
-      (docs.length? "<table style='margin-top:16px;'><thead><tr><th>File</th><th>Status</th><th></th></tr></thead><tbody>"+
-        docs.map(function(d){
-          return "<tr><td>"+esc(d.original_filename)+"</td><td>"+esc(d.extraction_status)+"</td>"+
-            "<td style='text-align:right;'>"+
-            (d.extraction_status!=="extracted"?"<button class='btn small ghost' data-extract='"+esc(d.id)+"'>Read it</button> ":"")+
-            "<button class='btn small danger' data-deldoc='"+esc(d.id)+"'>Delete</button></td></tr>";
-        }).join("")+"</tbody></table>"
-        : "<p class='empty'>No documents yet.</p>")+
+      "<p class='muted' style='margin-top:10px;font-size:.82rem;'>Upload anything you like &mdash; "+
+      "the agent reads every document it can and fills in what it learns, and never overwrites "+
+      "something you typed yourself.</p>"+
       "</section>"+
-      "<section class='panel'><h2>Details</h2><form id='profile-form'>"+profileFields(full,f)+
+      "<section class='panel'><h2>Details</h2><form id='profile-form'>"+profileFields(full,f,schema)+
       "<div class='row' style='margin-top:18px;'><button class='btn' type='submit'>Save profile</button>"+
       "<span class='status' id='profile-status'></span></div></form></section>";
 
-    LIST_FIELDS.forEach(function(field){ /* inputs already built by profileFields */ });
-    wireProfileForm(full);
+    wireProfileForm(full, schema);
     wireDocuments(p.id);
   }
 
-  function profileFields(full,f){
-    return "<label for='f-display'>Profile name</label>"+
-      "<input id='f-display' type='text' value='"+esc(full.display_name)+"'>"+
-      "<div class='grid2'><div>"+
-      "<label for='f-name'>Your name</label><input id='f-name' type='text' value='"+esc(f.name||"")+"'>"+
-      "<label for='f-country'>Country</label><input id='f-country' type='text' value='"+esc(f.country||"")+"'>"+
-      "<label for='f-age'>Age</label><input id='f-age' type='number' min='0' max='120' value='"+(f.age==null?"":f.age)+"'>"+
-      "<label for='f-study'>Study level</label><select id='f-study'>"+
-        ["","undergraduate","bachelors","masters","doctoral"].map(function(v){
-          return "<option value='"+v+"'"+((f.study_level||"")===v?" selected":"")+">"+(v||"Not specified")+"</option>";
-        }).join("")+"</select>"+
-      "<label for='f-field'>Field</label><input id='f-field' type='text' value='"+esc(f.field||"")+"'>"+
-      "</div><div>"+
-      "<label for='f-history'>About you</label><textarea id='f-history'>"+esc(f.history||"")+"</textarea>"+
-      "<label>Documents on hand</label>"+buildTagInput("documents","transcript, cv…",f.documents)+
-      "<label>Interests</label>"+buildTagInput("interests","Add and press Enter…",f.interests)+
-      "<label>Goals</label>"+buildTagInput("goals","What are you trying to achieve?",f.goals)+
-      "</div></div>"+
-      "<label>Certificates</label>"+buildTagInput("certificates","e.g. BSc Computer Science (2021)",f.certificates)+
-      "<label>Work history</label>"+buildTagInput("work_history","e.g. Software Engineer, Acme (2021-2024)",f.work_history)+
-      "<div class='grid2'><div><label>Preferred countries</label>"+
-        buildTagInput("preferred_countries","Add and press Enter…",f.preferred_countries)+"</div>"+
-      "<div><label>Preferred funding</label>"+
-        buildTagInput("preferred_funding","Add and press Enter…",f.preferred_funding)+"</div></div>"+
-      "<label>Achievements</label>"+buildTagInput("achievements","Add and press Enter…",f.achievements)+
-      "<label>Links</label><div class='grid2'><div>"+
-      SOCIAL.slice(0,2).map(function(s){return "<input id='f-social-"+s+"' type='text' placeholder='"+s+" URL' value='"+
-        esc((f.social_links||{})[s]||"")+"' style='margin-bottom:8px;'>";}).join("")+"</div><div>"+
-      SOCIAL.slice(2).map(function(s){return "<input id='f-social-"+s+"' type='text' placeholder='"+s+" URL' value='"+
-        esc((f.social_links||{})[s]||"")+"' style='margin-bottom:8px;'>";}).join("")+"</div></div>";
+  // A checklist, not a file dump. The owner needs to see at a glance which
+  // papers this kind of application needs and which of them are already in the
+  // vault - a list of filenames answers neither question.
+  function documentChecklist(schema, docs){
+    var byType = {};
+    docs.forEach(function(d){ (byType[d.doc_type] = byType[d.doc_type] || []).push(d); });
+
+    var slots = schema.documents.map(function(kind){
+      var held = byType[kind.key] || [];
+      var mark = held.length ? "<span class='doc-mark held' title='Uploaded'>&#10003;</span>"
+               : kind.required ? "<span class='doc-mark needed' title='Still needed'>!</span>"
+               : "<span class='doc-mark' title='Optional'>&ndash;</span>";
+      return "<div class='doc-slot'>"+mark+
+        "<span class='doc-name'><strong>"+esc(kind.label)+
+          (kind.required?"":" <span style='font-weight:400;'>(optional)</span>")+"</strong>"+
+        "<span>"+esc(held.length ? held.map(function(d){return d.original_filename;}).join(", ")
+                                  : (kind.hint||""))+"</span></span>"+
+        (held.length
+          ? held.map(function(d){
+              return "<button class='btn small danger' data-deldoc='"+esc(d.id)+"'>Remove</button>";
+            }).join("")
+          : "<button class='btn small ghost' data-slot='"+esc(kind.key)+"'>Upload</button>")+
+        "</div>";
+    }).join("");
+
+    var extras = (byType["other"]||[]).map(function(d){
+      return "<div class='doc-slot'><span class='doc-mark held'>&#10003;</span>"+
+        "<span class='doc-name'><strong>"+esc(d.original_filename)+"</strong>"+
+        "<span>Not on the checklist &mdash; "+esc(d.extraction_status)+"</span></span>"+
+        (d.extraction_status!=="extracted"
+          ? "<button class='btn small ghost' data-extract='"+esc(d.id)+"'>Read it</button>" : "")+
+        "<button class='btn small danger' data-deldoc='"+esc(d.id)+"'>Remove</button></div>";
+    }).join("");
+
+    return slots +
+      (extras ? "<h3 style='margin:20px 0 4px;font-size:.95rem;'>Anything else you've sent</h3>"+extras : "");
   }
 
-  function collectProfileFields(){
-    var payload={
-      name:$("#f-name").value.trim(),
-      country:$("#f-country").value.trim()||null,
-      age:$("#f-age").value===""?null:Number($("#f-age").value),
-      study_level:$("#f-study").value||null,
-      field:$("#f-field").value.trim()||null,
-      history:$("#f-history").value.trim()||null
-    };
-    LIST_FIELDS.forEach(function(f){payload[f]=readTags(f);});
+
+
+  // The setup form is built from /profiles/{id}/schema, not hard-coded. That
+  // is the whole point of choosing a profile type: a company is asked for its
+  // PRAZ categories and registration number, a student for a study level, and
+  // neither is shown the other's questions.
+  function profileFields(full,f,schema){
+    var html = "<label for='f-display'>Profile name</label>"+
+      "<input id='f-display' type='text' value='"+esc(full.display_name)+"'>";
+
+    if(schema.subject_is_choosable){
+      html += "<label for='f-subject'>Who is applying?</label>"+
+        "<select id='f-subject'>"+
+        ["individual","organisation"].map(function(v){
+          return "<option value='"+v+"'"+(schema.subject===v?" selected":"")+">"+
+            (v==="individual"?"Me, personally":"My organisation")+"</option>";
+        }).join("")+"</select>"+
+        "<p class='muted' style='margin:6px 0 14px;font-size:.82rem;'>Grants go both ways. "+
+        "This decides which questions and which documents you're asked for — save to switch.</p>";
+    }
+
+    var singles = schema.fields.filter(function(x){return x.kind!=="list";});
+    var lists   = schema.fields.filter(function(x){return x.kind==="list";});
+
+    html += "<div class='grid2'><div>";
+    singles.forEach(function(spec,i){
+      if(i===Math.ceil(singles.length/2)) html += "</div><div>";
+      html += fieldControl(spec, f[spec.key]);
+    });
+    html += "</div></div>";
+
+    lists.forEach(function(spec){
+      html += "<label>"+esc(spec.label)+"</label>"+
+        (spec.hint? "<p class='muted' style='margin:-4px 0 6px;font-size:.8rem;'>"+esc(spec.hint)+"</p>" : "")+
+        buildTagInput(spec.key, "Add and press Enter…", f[spec.key]);
+    });
+
+    html += "<label>Links</label><div class='grid2'><div>"+
+      SOCIAL.slice(0,2).map(function(x){return socialInput(x,f);}).join("")+"</div><div>"+
+      SOCIAL.slice(2).map(function(x){return socialInput(x,f);}).join("")+"</div></div>";
+    return html;
+  }
+
+  function socialInput(name,f){
+    return "<input id='f-social-"+name+"' type='text' placeholder='"+name+" URL' value='"+
+      esc((f.social_links||{})[name]||"")+"' style='margin-bottom:8px;'>";
+  }
+
+  function fieldControl(spec, value){
+    var id = "f-"+spec.key;
+    var label = "<label for='"+id+"'>"+esc(spec.label)+"</label>";
+    var hint = spec.hint ? "<p class='muted' style='margin:-4px 0 8px;font-size:.8rem;'>"+esc(spec.hint)+"</p>" : "";
+    if(spec.kind==="select"){
+      return label+"<select id='"+id+"'>"+spec.options.map(function(v){
+        return "<option value='"+esc(v)+"'"+((value||"")===v?" selected":"")+">"+
+          esc(v||"Not specified")+"</option>";}).join("")+"</select>"+hint;
+    }
+    if(spec.kind==="textarea"){
+      return label+"<textarea id='"+id+"'>"+esc(value||"")+"</textarea>"+hint;
+    }
+    if(spec.kind==="number"){
+      return label+"<input id='"+id+"' type='number' min='0' value='"+(value==null?"":esc(value))+"'>"+hint;
+    }
+    return label+"<input id='"+id+"' type='text' value='"+esc(value||"")+"'>"+hint;
+  }
+
+  function collectProfileFields(schema, existing){
+    // Start from what is already stored so switching a grant profile between
+    // person and company doesn't silently wipe the fields the other shape
+    // uses - the owner may well switch back.
+    var payload = Object.assign({}, existing||{});
+    schema.fields.forEach(function(spec){
+      if(spec.kind==="list"){ payload[spec.key]=readTags(spec.key); return; }
+      var el=$("#f-"+spec.key); if(!el) return;
+      var v=el.value;
+      if(spec.kind==="number"){ payload[spec.key] = v===""?null:Number(v); }
+      else { payload[spec.key] = (v||"").trim()||null; }
+    });
+    if(schema.subject_is_choosable){
+      var sub=$("#f-subject"); if(sub) payload.subject=sub.value;
+    }
     var links={};
-    SOCIAL.forEach(function(s){var el=$("#f-social-"+s); if(el&&el.value.trim()) links[s]=el.value.trim();});
+    SOCIAL.forEach(function(x){var el=$("#f-social-"+x); if(el&&el.value.trim()) links[x]=el.value.trim();});
     payload.social_links=links;
     return payload;
   }
 
-  function wireProfileForm(full){
+  function wireProfileForm(full, schema){
     $("#profile-form").addEventListener("submit",async function(e){
       e.preventDefault();
       var status=$("#profile-status");
-      if(!$("#f-name").value.trim()){ status.textContent="Your name is required."; status.className="status err"; return; }
+      var nameField=$("#f-name");
+      if(nameField && !nameField.value.trim()){
+        // The label differs by subject ("Your name" vs "Registered company
+        // name"), so the error has to quote whichever one is on screen.
+        var what=(schema.fields.filter(function(x){return x.key==="name";})[0]||{}).label||"Name";
+        status.textContent=what+" is required."; status.className="status err"; return;
+      }
       status.textContent="Saving…"; status.className="status";
       try{
         await api("/profiles/"+full.id,{method:"PUT",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({display_name:$("#f-display").value.trim()||full.display_name,
-                               fields:collectProfileFields()})});
+                               fields:collectProfileFields(schema, full.fields)})});
         status.textContent="Saved."; status.className="status ok";
         await loadProfiles(); renderSwitcher();
       }catch(err){ status.textContent=err.message; status.className="status err"; }
@@ -645,17 +786,28 @@
       var input=$("#doc-file"); var status=$("#doc-status");
       if(!input.files.length){ status.textContent="Choose a file first."; status.className="status err"; return; }
       var form=new FormData(); form.append("file",input.files[0]);
+      var typeSel=$("#doc-type");
+      form.append("doc_type", typeSel ? typeSel.value : "other");
       uploadBtn.disabled=true; status.textContent="Uploading…"; status.className="status";
       try{
         await fetch("/profiles/"+profileId+"/documents",{method:"POST",body:form}).then(function(r){
           if(!r.ok) return r.json().then(function(b){throw new Error(b.detail||"Upload failed");});
         });
         status.textContent="Uploaded."; status.className="status ok";
+        // Reload profiles too: an upload can unblock drafts server-side, and
+        // the dashboard counts would otherwise stay stale until a manual reload.
+        await loadNotifications();
         renderRoute();
       }catch(err){ status.textContent=err.message; status.className="status err"; }
       finally{ uploadBtn.disabled=false; }
     });
 
+    $all("[data-slot]").forEach(function(b){
+      b.addEventListener("click",function(){
+        var sel=$("#doc-type"); if(sel) sel.value=b.dataset.slot;
+        var file=$("#doc-file"); if(file){ file.focus(); file.click(); }
+      });
+    });
     $all("[data-extract]").forEach(function(b){
       b.addEventListener("click",async function(){
         b.disabled=true; b.innerHTML="<span class='spinner'></span>Reading…";
@@ -719,17 +871,20 @@
   }
 
   function renderOnboardStep1(existing){
-    var available=TYPES.filter(function(t){return existing.indexOf(t.id)===-1;});
+    var available=TYPES.filter(function(t){return existing.indexOf(t.key)===-1;});
     if(!available.length){ location.hash="#/dashboard"; return; }
     $("#view-root").innerHTML =
       "<h1 class='view-title'>"+(state.profiles.length?"Add another profile":"Welcome to OpportunityAI")+"</h1>"+
-      "<p class='view-sub'>Each profile is searched separately with its own documents, so your scholarship "+
-      "hunt never gets mixed up with your company's tenders.</p>"+
+      "<p class='view-sub'>Each profile is searched separately, with its own questions and its own "+
+      "documents — a company bidding for tenders is asked for its compliance pack, not for a CV.</p>"+
       stepBar(1)+
       "<section class='panel'><h2>What should this profile look for?</h2>"+
       "<div class='type-pick'>"+available.map(function(t){
-        return "<button type='button' class='type-card' data-type='"+t.id+"'><strong>"+esc(t.name)+
-          "</strong><span>"+esc(t.blurb)+"</span></button>";}).join("")+"</div>"+
+        var who = t.subject==="organisation" ? "For your company"
+                 : t.subject==="either" ? "You or your company" : "For you";
+        return "<button type='button' class='type-card' data-type='"+t.key+"'><strong>"+esc(t.label)+
+          "</strong><span>"+esc(t.blurb)+"</span>"+
+          "<span class='who'>"+esc(who)+"</span></button>";}).join("")+"</div>"+
       "<div class='row' style='margin-top:20px;'><button class='btn' id='ob-next' type='button' disabled>Continue</button>"+
       "<span class='status' id='ob-status'></span></div></section>";
 
@@ -759,24 +914,36 @@
 
   async function renderOnboardStep2(){
     var full=await api("/profiles/"+onboarding.createdId);
+    var schema=await api("/profiles/"+onboarding.createdId+"/schema");
+    var company = schema.subject==="organisation";
+
     $("#view-root").innerHTML =
-      "<h1 class='view-title'>Tell it about you</h1>"+
-      "<p class='view-sub'>This is what it searches with. You can upload a CV on the next screen and let it "+
-      "fill in the rest — for now, your name is the only thing it can't work without.</p>"+
+      "<h1 class='view-title'>"+(company?"Tell it about your company":"Tell it about you")+"</h1>"+
+      "<p class='view-sub'>"+
+        (company
+          ? "This is what it bids with. Your PRAZ supplier category codes matter most — they decide "+
+            "which tenders you're actually allowed to bid on."
+          : "This is what it searches with. You can upload a CV on the next screen and let it fill in "+
+            "the rest.")+
+        " For now, "+esc(((schema.fields.filter(function(x){return x.key==='name';})[0]||{}).label||'a name').toLowerCase())+
+        " is the only thing it can't work without.</p>"+
       stepBar(2)+
-      "<section class='panel'><form id='profile-form'>"+profileFields(full,full.fields||{})+
+      "<section class='panel'><form id='profile-form'>"+profileFields(full,full.fields||{},schema)+
       "<div class='row' style='margin-top:18px;'><button class='btn' type='submit'>Save and continue</button>"+
       "<span class='status' id='profile-status'></span></div></form></section>";
 
     $("#profile-form").addEventListener("submit",async function(e){
       e.preventDefault();
       var status=$("#profile-status");
-      if(!$("#f-name").value.trim()){ status.textContent="Your name is required."; status.className="status err"; return; }
+      if(!$("#f-name").value.trim()){
+        var what=(schema.fields.filter(function(x){return x.key==="name";})[0]||{}).label||"Name";
+        status.textContent=what+" is required."; status.className="status err"; return;
+      }
       status.textContent="Saving…"; status.className="status";
       try{
         await api("/profiles/"+full.id,{method:"PUT",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({display_name:$("#f-display").value.trim()||full.display_name,
-                               fields:collectProfileFields()})});
+                               fields:collectProfileFields(schema, full.fields)})});
         await loadProfiles(); renderSwitcher();
         onboarding.step=3; renderRoute();
       }catch(err){ status.textContent=err.message; status.className="status err"; }
@@ -802,6 +969,9 @@
 
   // ---------------- bootstrap ----------------
   async function loadProfiles(){
+    if(!TYPES.length){
+      try{ TYPES = await api("/profile-types"); }catch(e){ TYPES=[]; }
+    }
     state.profiles = await api("/profiles");
     var saved=null;
     try{ saved=localStorage.getItem("activeProfileId"); }catch(e){}
