@@ -132,7 +132,30 @@ Don't assume auth applies to those endpoints just because it exists now.
 | Autonomous per-profile pipeline | `pipeline.py`, `models_db.py`, `api.py`, `worker.py` | Claude | **done** - the unattended loop (discover → match → auto-shortlist → auto-draft → notify) running per profile for every account on the worker's schedule. Live-verified: real run found 10, added 4, auto-drafted 2, queued a notification |
 | Delete endpoints for Profile/Account | not started | open, small | found while cleaning up e2e test data - had to delete rows directly via `psql` (children before parent - no DB-level `ON DELETE CASCADE`, only the ORM-level `cascade=` in `models_db.py`) since no `DELETE /profiles/{id}` or `DELETE /accounts/{id}` exists. Small, worth adding |
 | Retire the legacy single-tenant path | `store.py`, `api.py`'s `/discover`,`/matches`,`/digest`,`/opportunities/*` | open | superseded by the per-profile pipeline above, which was built alongside it rather than rewriting it so the live deployment never broke. Nothing in the UI calls the old endpoints any more. Deleting them (and `store.py`, and `worker.py`'s legacy cycle) is now a straightforward cleanup - check nothing else references them first |
+| Per-type profiles (person vs organisation) | `profile_schema.py`, `api.py`, `web/index.html` | Claude | **done** - profile type selects subject, fields, document checklist and search vocabulary. One table; a new opportunity type is a data change here, not a hunt through five modules. Killed a live bug: `build_search_queries` hard-coded "scholarship" for every type |
+| PRAZ eGP tender source | `egp.py` | Claude | **done and live-verified** - 884 public tenders, board + detail pages. Two traps found only by using real markup: `data-label` attributes are shifted against the page's own `<thead>` (parse by column position), and category codes can be multi-valued ("SH001 ,SP001 ,SV001"). Strips HTML comments before parsing - the page hides its contact person in one, and that is not ours to lift. **Bid documents themselves need a logged-in PRAZ supplier account**; only the listing is public |
+| Compliance advisor | `compliance.py` | Claude | **done** - "what to do and what to upload" from parsed facts only. Blockers (wrong PRAZ category, closed tender) kept separate from actions (upload this, pay that). Hard rule: every line traces to a published fact or an owner-entered field. Never invent a plausible-sounding requirement - the owner will go and act on it |
+| Missing-document request loop | `pipeline.py`, `api.py` | Claude | **done** - stage `needs_documents`, a notification naming the paper the way the owner's filing cabinet does, and `resume_after_documents()` so an upload unblocks drafts without anyone asking |
+| Auto-filling application forms on the opportunity site | not started | **open, and read this first** | the natural next step, and the honest scoping is: reading a page for its forms and downloadable packs is straightforward and worth doing. *Submitting* is not. Evidence in SOLUTION_DEFINITION.md §17 - a funded 9-person team at $5M ARR doing only this still cannot reliably auto-submit. For eGP specifically the bid pack is behind a supplier login, so any automation needs the owner's PRAZ credentials, which is a security decision to put to them, not an implementation detail to assume |
 | Learning from feedback | not started | open | signal is already being collected (`usefulness`, decision history, escalations) and nothing consumes it. Be honest about scale before building: tens of opportunities a week is not training data. The achievable version is inspectable heuristics - down-weight sources always dismissed, up-weight terms in what gets approved - as a layer *above* the hard eligibility rules, never replacing them. See SOLUTION_DEFINITION.md §16 |
+
+## Note for Codex: a deliberate change in your lane
+
+`matching.py`: a missing required document is **no longer** a hard failure
+producing "ineligible". It now reports on `MatchResult.missing_documents`, a
+separate dimension, and `test_missing_document_is_a_hard_failure` was rewritten
+accordingly (not deleted by accident - see the new name and its docstring).
+
+Reason: the owner asked for the agent to *request* missing paperwork and carry
+on once it arrives. "You do not qualify" and "you qualify but I need your tax
+clearance" are different answers and only the second is fixable by the owner in
+two minutes; collapsing them into "ineligible" was silently discarding winnable
+work. `drafting.py` still shows them as `missing` on the checklist, so the
+submission-readiness view is unchanged.
+
+Also in that file: `required_categories` matching (PRAZ supplier codes) and
+`getattr` access for `study_level`/`field`/`age`, because an OrganisationProfile
+has none of them. If you were mid-change here, rebase rather than revert.
 
 ## Review protocol
 
