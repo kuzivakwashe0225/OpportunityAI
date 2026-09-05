@@ -78,7 +78,7 @@ def test_cycle_with_no_profile_fields_records_nothing(session):
 def test_cycle_stores_discovered_opportunities_scoped_to_the_profile(session, profile):
     run = pipeline.run_profile_cycle(
         session, profile, api_key="k",
-        search_fn=lambda p, api_key: [SearchResult(title="Award", url="https://example.org/award", content="x")],
+        search_fn=lambda p, api_key, **kw: [SearchResult(title="Award", url="https://example.org/award", content="x")],
         fetch_fn=lambda url: _eligible_page(url),
     )
 
@@ -92,7 +92,7 @@ def test_cycle_stores_discovered_opportunities_scoped_to_the_profile(session, pr
 def test_eligible_opportunities_are_auto_drafted_without_human_input(session, profile):
     pipeline.run_profile_cycle(
         session, profile, api_key="k",
-        search_fn=lambda p, api_key: [SearchResult(title="Award", url="https://example.org/award", content="x")],
+        search_fn=lambda p, api_key, **kw: [SearchResult(title="Award", url="https://example.org/award", content="x")],
         fetch_fn=lambda url: _eligible_page(url),
     )
 
@@ -106,7 +106,7 @@ def test_eligible_opportunities_are_auto_drafted_without_human_input(session, pr
 def test_ineligible_opportunities_are_kept_but_not_drafted(session, profile):
     pipeline.run_profile_cycle(
         session, profile, api_key="k",
-        search_fn=lambda p, api_key: [SearchResult(title="Kenya Award", url="https://example.org/kenya", content="x")],
+        search_fn=lambda p, api_key, **kw: [SearchResult(title="Kenya Award", url="https://example.org/kenya", content="x")],
         fetch_fn=lambda url: _ineligible_page(url),
     )
 
@@ -119,7 +119,7 @@ def test_ineligible_opportunities_are_kept_but_not_drafted(session, profile):
 def test_a_notification_is_created_when_applications_are_drafted(session, profile):
     pipeline.run_profile_cycle(
         session, profile, api_key="k",
-        search_fn=lambda p, api_key: [SearchResult(title="Award", url="https://example.org/award", content="x")],
+        search_fn=lambda p, api_key, **kw: [SearchResult(title="Award", url="https://example.org/award", content="x")],
         fetch_fn=lambda url: _eligible_page(url),
     )
 
@@ -133,7 +133,7 @@ def test_a_notification_is_created_when_applications_are_drafted(session, profil
 def test_no_notification_when_nothing_was_drafted(session, profile):
     pipeline.run_profile_cycle(
         session, profile, api_key="k",
-        search_fn=lambda p, api_key: [SearchResult(title="Kenya", url="https://example.org/kenya", content="x")],
+        search_fn=lambda p, api_key, **kw: [SearchResult(title="Kenya", url="https://example.org/kenya", content="x")],
         fetch_fn=lambda url: _ineligible_page(url),
     )
 
@@ -144,7 +144,7 @@ def test_rerunning_does_not_duplicate_the_same_opportunity(session, profile):
     for _ in range(2):
         pipeline.run_profile_cycle(
             session, profile, api_key="k",
-            search_fn=lambda p, api_key: [SearchResult(title="Award", url="https://example.org/award", content="x")],
+            search_fn=lambda p, api_key, **kw: [SearchResult(title="Award", url="https://example.org/award", content="x")],
             fetch_fn=lambda url: _eligible_page(url),
         )
 
@@ -159,7 +159,7 @@ def test_a_fetch_failure_is_recorded_without_killing_the_cycle(session, profile)
 
     run = pipeline.run_profile_cycle(
         session, profile, api_key="k",
-        search_fn=lambda p, api_key: [
+        search_fn=lambda p, api_key, **kw: [
             SearchResult(title="Bad", url="https://example.org/bad", content="x"),
             SearchResult(title="Good", url="https://example.org/award", content="x"),
         ],
@@ -175,7 +175,7 @@ def test_a_fetch_failure_is_recorded_without_killing_the_cycle(session, profile)
 def test_escalating_an_ineligible_opportunity_drafts_it_anyway(session, profile):
     pipeline.run_profile_cycle(
         session, profile, api_key="k",
-        search_fn=lambda p, api_key: [SearchResult(title="Kenya", url="https://example.org/kenya", content="x")],
+        search_fn=lambda p, api_key, **kw: [SearchResult(title="Kenya", url="https://example.org/kenya", content="x")],
         fetch_fn=lambda url: _ineligible_page(url),
     )
     stored = session.query(models_db.StoredOpportunity).one()
@@ -192,7 +192,7 @@ def test_escalating_an_ineligible_opportunity_drafts_it_anyway(session, profile)
 
 
 def test_search_failure_records_a_run_rather_than_raising(session, profile):
-    def failing_search(p, api_key):
+    def failing_search(p, api_key, **kw):
         raise RuntimeError("search API unreachable")
 
     run = pipeline.run_profile_cycle(session, profile, api_key="k", search_fn=failing_search)
@@ -200,3 +200,193 @@ def test_search_failure_records_a_run_rather_than_raising(session, profile):
     assert run is not None
     assert run.found == 0
     assert "search API unreachable" in run.failures[0]
+
+
+# ---------------------------------------------------------------------------
+# "Please may I have these documents" - and noticing when they arrive
+# ---------------------------------------------------------------------------
+
+def _page_needing_a_reference(url="https://example.org/award"):
+    return PublicPage(
+        url=url,
+        content=(
+            "Open to citizens of Zimbabwe. Applicants must be enrolled in a master's "
+            "programme in computer science. Required documents: CV, transcript, "
+            "reference letter."
+        ),
+        retrieved_at="2026-01-01T00:00:00Z",
+        sha256="ghi",
+        content_type="text/html",
+    )
+
+
+def test_a_qualifying_opportunity_missing_a_file_waits_instead_of_being_dropped(session, profile):
+    """The owner qualifies. One file is missing. That is a request, not a
+    rejection, and the draft still gets written so it's ready the moment the
+    file lands."""
+    pipeline.run_profile_cycle(
+        session, profile, api_key="k",
+        search_fn=lambda p, api_key, **kw: [
+            SearchResult(title="Award", url="https://example.org/award", content="x")
+        ],
+        fetch_fn=_page_needing_a_reference,
+    )
+
+    stored = session.query(models_db.StoredOpportunity).one()
+    assert stored.stage == "needs_documents"
+    assert stored.match_status == "eligible"
+    assert stored.package, "the draft is written up front, not after the upload"
+
+
+def test_the_owner_is_told_exactly_which_document_is_wanted(session, profile):
+    pipeline.run_profile_cycle(
+        session, profile, api_key="k",
+        search_fn=lambda p, api_key, **kw: [
+            SearchResult(title="Award", url="https://example.org/award", content="x")
+        ],
+        fetch_fn=_page_needing_a_reference,
+    )
+
+    notification = session.query(models_db.Notification).filter_by(
+        kind="documents_requested"
+    ).one()
+    assert "reference" in notification.message.lower()
+    assert "upload" in notification.message.lower()
+
+
+def test_uploading_the_document_unblocks_the_draft_without_being_asked(session, profile):
+    """The other half of asking: having asked, the agent has to notice the
+    answer on its own, or the opportunity sits blocked until somebody looks."""
+    pipeline.run_profile_cycle(
+        session, profile, api_key="k",
+        search_fn=lambda p, api_key, **kw: [
+            SearchResult(title="Award", url="https://example.org/award", content="x")
+        ],
+        fetch_fn=_page_needing_a_reference,
+    )
+    assert session.query(models_db.StoredOpportunity).one().stage == "needs_documents"
+
+    session.add(models_db.Document(
+        profile_id=profile.id, object_key="k", doc_type="reference letter",
+        original_filename="ref.pdf", content_type="application/pdf", size_bytes=10,
+    ))
+    session.commit()
+    session.refresh(profile)
+
+    unblocked = pipeline.resume_after_documents(session, profile)
+
+    assert unblocked == 1
+    assert session.query(models_db.StoredOpportunity).one().stage == "drafted"
+
+
+def test_resuming_with_the_document_still_absent_changes_nothing(session, profile):
+    pipeline.run_profile_cycle(
+        session, profile, api_key="k",
+        search_fn=lambda p, api_key, **kw: [
+            SearchResult(title="Award", url="https://example.org/award", content="x")
+        ],
+        fetch_fn=_page_needing_a_reference,
+    )
+
+    assert pipeline.resume_after_documents(session, profile) == 0
+    assert session.query(models_db.StoredOpportunity).one().stage == "needs_documents"
+
+
+def test_an_uploaded_file_counts_as_a_document_the_owner_holds(session, profile):
+    session.add(models_db.Document(
+        profile_id=profile.id, object_key="k", doc_type="tax_clearance",
+        original_filename="itf263.pdf", content_type="application/pdf", size_bytes=10,
+    ))
+    session.add(models_db.Document(
+        profile_id=profile.id, object_key="k2", doc_type="other",
+        original_filename="notes.txt", content_type="text/plain", size_bytes=3,
+    ))
+    session.commit()
+    session.refresh(profile)
+
+    held = pipeline.held_document_keys(profile)
+
+    assert "tax_clearance" in held
+    assert "transcript" in held, "typed-in documents count too"
+    assert "other" not in held, "an unclassified upload proves nothing about what it is"
+
+
+# ---------------------------------------------------------------------------
+# Tenders come off the PRAZ board, not out of a web search
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def company_profile(session):
+    account = models_db.Account(email="co@example.com", password_hash="x")
+    session.add(account)
+    session.commit()
+    company = models_db.Profile(
+        account_id=account.id, profile_type="tender", display_name="Tenders",
+        fields={
+            "name": "Meshcloud Zimbabwe",
+            "country": "Zimbabwe",
+            "praz_categories": ["GE001"],
+            "categories": ["GE001"],
+            "sectors": ["ICT hardware"],
+        },
+    )
+    session.add(company)
+    session.commit()
+    return company
+
+
+def test_a_tender_profile_reads_the_board_and_never_calls_web_search(session, company_profile):
+    from opportunity_agent import egp
+    from opportunity_agent.models import Opportunity
+
+    searched = []
+
+    def spy_search(p, api_key, **kw):
+        searched.append(kw)
+        return []
+
+    tender = Opportunity(
+        source="PRAZ eGP", title="Supply of transformers",
+        url="https://egp.praz.org.zw/Indexes/viewLiveTenderDetails/1",
+        eligible_countries=["Zimbabwe"], required_categories=["GE001"],
+        required_documents=[], evidence=["PRAZ eGP bulletin board listing"],
+        requirements_verified=True,
+    )
+    details = egp.TenderDetails(bid_security_domestic=25000, addendum_count=7)
+
+    run = pipeline.run_profile_cycle(
+        session, company_profile, api_key="k",
+        search_fn=spy_search, tender_fn=lambda: [(tender, details)],
+    )
+
+    assert searched == [], "tenders must not go through the search API"
+    assert run.found == 1
+    stored = session.query(models_db.StoredOpportunity).one()
+    assert stored.match_status == "eligible"
+    assert stored.stage == "drafted"
+
+
+def test_a_tender_draft_carries_the_advice_the_bidder_needs(session, company_profile):
+    from opportunity_agent import egp
+    from opportunity_agent.models import Opportunity
+
+    tender = Opportunity(
+        source="PRAZ eGP", title="Supply of transformers",
+        url="https://egp.praz.org.zw/Indexes/viewLiveTenderDetails/1",
+        eligible_countries=["Zimbabwe"], required_categories=["GE001"],
+        required_documents=["tax_clearance"],
+        evidence=["PRAZ eGP bulletin board listing"], requirements_verified=True,
+    )
+    details = egp.TenderDetails(bid_security_domestic=25000, addendum_count=7)
+
+    pipeline.run_profile_cycle(
+        session, company_profile, api_key="k",
+        search_fn=lambda p, api_key, **kw: [], tender_fn=lambda: [(tender, details)],
+    )
+
+    stored = session.query(models_db.StoredOpportunity).one()
+    advice = " ".join(stored.compliance["actions"])
+    assert "25,000" in advice
+    assert "addend" in advice.lower()
+    assert "Tax Clearance" in advice
+    assert stored.compliance["ready_to_submit"] is False

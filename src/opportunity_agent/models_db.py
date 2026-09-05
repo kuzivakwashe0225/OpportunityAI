@@ -126,7 +126,14 @@ class StoredOpportunity(Base):
     match_status: Mapped[str] = mapped_column(String(20), nullable=False)
     match_score: Mapped[int] = mapped_column(default=0)
     match_reasons: Mapped[dict] = mapped_column(JSON, default=dict)
+    # discovered -> needs_documents -> drafted -> approved / dismissed / submitted
+    # "needs_documents" is its own stage rather than a flag: the owner qualifies
+    # and the draft exists, but a file is missing, and that is a different call
+    # to action from "read this and approve it".
     stage: Mapped[str] = mapped_column(String(20), default="discovered")
+    # The compliance advisor's output for this opportunity (compliance.py):
+    # what is held, what is missing, what to do, what blocks submission.
+    compliance: Mapped[dict | None] = mapped_column(JSON, default=None)
     escalated: Mapped[bool] = mapped_column(default=False)
     package: Mapped[dict | None] = mapped_column(JSON, default=None)
     usefulness: Mapped[str | None] = mapped_column(String(20), default=None)

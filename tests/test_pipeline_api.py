@@ -45,7 +45,7 @@ def _ineligible_page(url):
 
 
 def _run_with(monkeypatch, profile_id, results, page_fn):
-    monkeypatch.setattr(api, "_pipeline_search", lambda p, api_key: results)
+    monkeypatch.setattr(api, "_pipeline_search", lambda p, api_key, **kw: results)
     monkeypatch.setattr(api, "_pipeline_fetch", page_fn)
     monkeypatch.setenv("TAVILY_API_KEY", "test-key")
     return client.post(f"/profiles/{profile_id}/run")
