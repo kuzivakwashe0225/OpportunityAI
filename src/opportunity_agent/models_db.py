@@ -20,7 +20,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
 
-PROFILE_TYPES = ("scholarship", "job", "grant")
+# "tender" is separate from "grant" deliberately: both are organisation-shaped,
+# but a tender is a contract bid found on procurement boards (see egp.py) and a
+# grant is a funding call found by search, so they need different discovery.
+# What each type asks the owner for lives in profile_schema.py, not here.
+PROFILE_TYPES = ("scholarship", "job", "grant", "tender")
 
 
 def _uuid() -> str:
@@ -81,6 +85,11 @@ class Document(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id"), nullable=False)
     object_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    # Which paper this *is* (profile_schema.DocumentKind.key), not just its
+    # filename. Without it the agent can see that four files were uploaded but
+    # not whether any of them is the tax clearance a tender is asking for.
+    # "other" for anything the owner didn't classify.
+    doc_type: Mapped[str] = mapped_column(String(50), default="other")
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     size_bytes: Mapped[int] = mapped_column(nullable=False)

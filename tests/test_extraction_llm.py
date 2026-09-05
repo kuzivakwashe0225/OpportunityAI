@@ -58,6 +58,26 @@ def test_extract_facts_never_invents_a_value_for_missing_fields():
     assert result.field is None
 
 
+def test_extract_facts_normalizes_a_nested_model_list_into_one_role():
+    """qwen occasionally wraps role fragments in a nested JSON list.
+
+    A malformed response must not turn a valid uploaded document into a 502.
+    """
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"response": json.dumps({
+            "work_history": [[
+                "Software Engineer",
+                "Acme Corp (2021-2024): built payments infrastructure",
+            ]],
+        })})
+
+    result = extract_facts_from_text("cv text", client=_client_with(handler))
+
+    assert result.work_history == [
+        "Software Engineer Acme Corp (2021-2024): built payments infrastructure"
+    ]
+
+
 def test_extract_facts_returns_empty_result_on_unparseable_model_output():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"response": "not valid json at all"})

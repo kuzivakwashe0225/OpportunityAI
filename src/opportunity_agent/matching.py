@@ -39,6 +39,7 @@ def match_opportunity(
         or opportunity.required_levels
         or opportunity.required_fields
         or opportunity.required_age_max is not None
+        or opportunity.required_categories
         or opportunity.required_documents
     )
     if not opportunity.requirements_verified:
@@ -60,7 +61,7 @@ def match_opportunity(
             unknown.append("country is required")
 
     if opportunity.required_levels:
-        level_match = _contains(profile.study_level, opportunity.required_levels)
+        level_match = _contains(getattr(profile, 'study_level', None), opportunity.required_levels)
         if level_match is True:
             matched.append("study level")
         elif level_match is False:
@@ -69,7 +70,7 @@ def match_opportunity(
             unknown.append("study level is required")
 
     if opportunity.required_fields:
-        field_match = _contains(profile.field, opportunity.required_fields)
+        field_match = _contains(getattr(profile, 'field', None), opportunity.required_fields)
         if field_match is True:
             matched.append("field of study")
         elif field_match is False:
@@ -78,19 +79,42 @@ def match_opportunity(
             unknown.append("field of study is required")
 
     if opportunity.required_age_max is not None:
-        if profile.age is None:
+        if getattr(profile, 'age', None) is None:
             unknown.append("age is required")
         elif profile.age <= opportunity.required_age_max:
             matched.append("age")
         else:
             failed.append(f"age must be at most {opportunity.required_age_max}")
 
+    # Supplier category codes (PRAZ, for tenders). The one genuinely hard,
+    # checkable rule in this system: you either hold a registration covering
+    # the category or you cannot bid. Organisation profiles only - a person
+    # has no categories, so this block is skipped entirely for them.
+    if opportunity.required_categories:
+        held = {code.strip().upper() for code in getattr(profile, "categories", []) or []}
+        wanted = {code.strip().upper() for code in opportunity.required_categories}
+        if not held:
+            unknown.append(
+                "supplier category registration is required: "
+                + ", ".join(sorted(wanted))
+            )
+        elif held & wanted:
+            matched.append(f"supplier category: {', '.join(sorted(held & wanted))}")
+        else:
+            failed.append(
+                "registration required in one of: " + ", ".join(sorted(wanted))
+            )
+
+    # Documents are a separate dimension, not a failed requirement - see
+    # MatchResult.missing_documents. A missing transcript does not mean the
+    # applicant is ineligible, it means the agent has to ask for the file.
     profile_documents = {document.casefold() for document in profile.documents}
+    missing_documents: list[str] = []
     for document in opportunity.required_documents:
         if document.casefold() in profile_documents:
             matched.append(f"document: {document}")
         else:
-            failed.append(f"missing document: {document}")
+            missing_documents.append(document)
 
     if failed:
         status = "ineligible"
@@ -115,4 +139,5 @@ def match_opportunity(
         matched_requirements=matched,
         failed_requirements=failed,
         unknown_requirements=unknown,
+        missing_documents=missing_documents,
     )

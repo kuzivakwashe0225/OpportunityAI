@@ -51,6 +51,35 @@ class ExtractedFacts(BaseModel):
     field: str | None = None
 
 
+def _text_list_from_model(value: object) -> list[str]:
+    """Keep text from a model-produced list without trusting its shape.
+
+    Small local models occasionally emit a role as a nested JSON array, for
+    example ``[[\"Software Engineer\", \"Acme (2021-2024)\"]]``.  That is
+    still document-derived information, but it is not valid for our
+    ``list[str]`` contract.  Flatten each nested entry into one readable item
+    rather than failing extraction of the entire uploaded document.  Other
+    JSON types are deliberately ignored: we do not stringify objects or
+    numbers into profile facts.
+    """
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if not isinstance(value, list):
+        return []
+
+    items: list[str] = []
+    for entry in value:
+        if isinstance(entry, str):
+            cleaned = entry.strip()
+            if cleaned:
+                items.append(cleaned)
+        elif isinstance(entry, list):
+            parts = _text_list_from_model(entry)
+            if parts:
+                items.append(" ".join(parts))
+    return items
+
+
 def extract_facts_from_text(
     text: str,
     *,
@@ -82,8 +111,8 @@ def extract_facts_from_text(
         return ExtractedFacts()
 
     return ExtractedFacts(
-        work_history=parsed.get("work_history") or [],
-        certificates=parsed.get("certificates") or [],
+        work_history=_text_list_from_model(parsed.get("work_history")),
+        certificates=_text_list_from_model(parsed.get("certificates")),
         study_level=parsed.get("study_level") or None,
         field=parsed.get("field") or None,
     )

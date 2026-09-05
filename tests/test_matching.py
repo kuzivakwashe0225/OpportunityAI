@@ -61,14 +61,88 @@ def test_matching_profile_gets_explainable_score():
     assert result.failed_requirements == []
 
 
-def test_missing_document_is_a_hard_failure():
+def test_a_missing_document_is_a_request_not_a_rejection():
+    """Deliberate behaviour change (was: hard failure -> "ineligible").
+
+    "You do not qualify" and "you qualify but I still need your reference
+    letter" are different answers, and only the second one is fixable by the
+    owner in two minutes. Collapsing them into "ineligible" threw away
+    winnable opportunities silently. Documents now report on their own
+    dimension so the agent can go and ask for the file instead.
+    """
     result = match_opportunity(
         make_opportunity(required_documents=["transcript", "cv", "reference"]),
         make_profile(),
     )
 
+    assert result.missing_documents == ["reference"]
+    assert not any("reference" in item.lower() for item in result.failed_requirements)
+    assert result.status != "ineligible"
+
+
+def test_documents_already_held_are_not_asked_for_again():
+    result = match_opportunity(
+        make_opportunity(required_documents=["transcript", "cv"]),
+        make_profile(),
+    )
+
+    assert result.missing_documents == []
+    assert result.status == "eligible"
+
+
+def make_tender(**overrides):
+    """A tender-shaped opportunity: no study level, no field, no age cap.
+
+    Reusing the scholarship fixture here was a mistake worth keeping a note
+    about - it asked a company for its study level and produced needs_review,
+    which is correct behaviour on a nonsensical input, not a matching bug.
+    """
+    payload = {
+        "source": "PRAZ eGP",
+        "title": "Supply of transformers",
+        "url": "https://egp.praz.org.zw/Indexes/viewLiveTenderDetails/1",
+        "eligible_countries": ["Zimbabwe"],
+        "required_documents": [],
+        "evidence": ["PRAZ eGP bulletin board listing"],
+        "requirements_verified": True,
+    }
+    payload.update(overrides)
+    return Opportunity(**payload)
+
+
+def test_a_company_without_the_required_supplier_category_is_ineligible():
+    """The one hard, checkable rule in the system - PRAZ registration either
+    covers the tender's category or it does not."""
+    from opportunity_agent.models import OrganisationProfile
+
+    company = OrganisationProfile(name="Meshcloud", country="Zimbabwe", categories=["GE001"])
+    result = match_opportunity(make_tender(required_categories=["SV001"]), company)
+
     assert result.status == "ineligible"
-    assert any("reference" in item.lower() for item in result.failed_requirements)
+    assert any("SV001" in item for item in result.failed_requirements)
+
+
+def test_a_company_holding_any_one_of_the_accepted_categories_qualifies():
+    from opportunity_agent.models import OrganisationProfile
+
+    company = OrganisationProfile(name="Meshcloud", country="Zimbabwe", categories=["sp001"])
+    result = match_opportunity(
+        make_tender(required_categories=["SH001", "SP001", "SV001"]), company
+    )
+
+    assert result.status == "eligible"
+    assert any("SP001" in item for item in result.matched_requirements)
+
+
+def test_a_company_that_has_not_told_us_its_categories_needs_review():
+    """Not ineligible - we simply don't know yet, and saying "you can't bid"
+    on the strength of a blank field would hide real work."""
+    from opportunity_agent.models import OrganisationProfile
+
+    company = OrganisationProfile(name="Meshcloud", country="Zimbabwe")
+    result = match_opportunity(make_tender(required_categories=["GE001"]), company)
+
+    assert result.status == "needs_review"
 
 
 def test_missing_evidence_requires_review():
