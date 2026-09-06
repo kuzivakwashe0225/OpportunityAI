@@ -10,6 +10,11 @@ services:
       OPPORTUNITY_AGENT_STORE_PATH: /data/store.json
       TAVILY_API_KEY: ${TAVILY_API_KEY:?set TAVILY_API_KEY in .env}
       SESSION_SECRET_KEY: "${SESSION_SECRET_KEY:?set SESSION_SECRET_KEY in .env, e.g. via python -c 'import secrets, sys; sys.stdout.write(secrets.token_hex(32))'}"
+      # Portal credentials (the owner's eGP login) are encrypted with this.
+      # Unset is a valid state: the credentials feature refuses to store
+      # anything rather than falling back to plaintext, so the rest of the app
+      # runs fine without it. Deliberately NOT `:?` for that reason.
+      CREDENTIALS_SECRET_KEY: ${CREDENTIALS_SECRET_KEY:-}
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-opportunity}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-opportunity-secret}
