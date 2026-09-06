@@ -14,6 +14,7 @@ load_dotenv()
 
 from . import auth as auth_module
 from . import db as db_module
+from . import credentials as credentials_module
 from . import documents as documents_module
 from . import models_db
 from . import pipeline as pipeline_module
@@ -23,6 +24,7 @@ from .discovery import build_search_queries, discover
 from .connector import fetch_public_page
 from .document_text import extract_text
 from .drafting import build_application_package
+from . import egp_session
 from .extraction import PARSER_VERSION, page_to_opportunity
 from .extraction_llm import ExtractedFacts, extract_facts_from_text
 from .matching import match_opportunity
@@ -388,6 +390,152 @@ def get_profile_schema(
     }
 
 
+SUPPORTED_PORTALS = {"egp": "PRAZ eGP"}
+
+
+class CredentialIn(BaseModel):
+    username: str
+    password: str
+
+
+class CredentialOut(BaseModel):
+    """What the API is willing to say about a stored credential.
+
+    Note what is absent: the password, and the ciphertext. There is no
+    endpoint anywhere that returns either. `has_password` is all the UI needs
+    to render "configured" vs "not configured", and anything more would put
+    the owner's portal password one careless response away from the page
+    source.
+    """
+
+    portal: str
+    portal_label: str
+    username: str
+    has_password: bool
+    verification_status: str
+    verification_detail: str | None
+    last_verified_at: datetime | None
+
+
+def _credential_out(credential: models_db.PortalCredential) -> CredentialOut:
+    return CredentialOut(
+        portal=credential.portal,
+        portal_label=SUPPORTED_PORTALS.get(credential.portal, credential.portal),
+        username=credential.username,
+        has_password=bool(credential.secret_ciphertext),
+        verification_status=credential.verification_status,
+        verification_detail=credential.verification_detail,
+        last_verified_at=credential.last_verified_at,
+    )
+
+
+@app.get("/profiles/{profile_id}/credentials", response_model=list[CredentialOut])
+def list_credentials(
+    profile_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> list[CredentialOut]:
+    profile = _get_owned_profile(profile_id, account, db)
+    return [_credential_out(c) for c in profile.credentials]
+
+
+@app.put("/profiles/{profile_id}/credentials/{portal}", response_model=CredentialOut)
+def save_credential(
+    profile_id: str,
+    portal: str,
+    payload: CredentialIn,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> CredentialOut:
+    """Store the owner's portal login, encrypted.
+
+    Refuses outright when no encryption key is configured rather than storing
+    the password in clear - see credentials.py. That means a deployment
+    without CREDENTIALS_SECRET_KEY simply cannot use this feature, which is
+    the correct trade.
+    """
+    profile = _get_owned_profile(profile_id, account, db)
+    if portal not in SUPPORTED_PORTALS:
+        raise HTTPException(status_code=422, detail=f"unknown portal: {portal}")
+    if not payload.username.strip():
+        raise HTTPException(status_code=422, detail="username is required")
+
+    try:
+        ciphertext = credentials_module.encrypt_secret(payload.password)
+    except credentials_module.CredentialError as error:
+        # 503, not 400: the request is fine, the deployment isn't configured.
+        raise HTTPException(status_code=503, detail=str(error))
+
+    credential = db.query(models_db.PortalCredential).filter_by(
+        profile_id=profile.id, portal=portal
+    ).first()
+    if credential is None:
+        credential = models_db.PortalCredential(profile_id=profile.id, portal=portal)
+        db.add(credential)
+
+    credential.username = payload.username.strip()
+    credential.secret_ciphertext = ciphertext
+    # Changing a password invalidates whatever we knew about the old one.
+    credential.verification_status = "untested"
+    credential.verification_detail = None
+    credential.last_verified_at = None
+    db.commit()
+    return _credential_out(credential)
+
+
+@app.post("/profiles/{profile_id}/credentials/{portal}/verify", response_model=CredentialOut)
+def verify_credential(
+    profile_id: str,
+    portal: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> CredentialOut:
+    """Try the stored credentials against the portal, once, on demand.
+
+    Deliberately owner-triggered rather than automatic: repeated failed logins
+    against a government procurement system can lock the owner's real supplier
+    account, so this happens when they ask for it and not on a schedule.
+    """
+    profile = _get_owned_profile(profile_id, account, db)
+    credential = db.query(models_db.PortalCredential).filter_by(
+        profile_id=profile.id, portal=portal
+    ).first()
+    if credential is None:
+        raise HTTPException(status_code=404, detail="no credentials stored for this portal")
+
+    try:
+        secret = credentials_module.decrypt_secret(credential.secret_ciphertext)
+    except credentials_module.CredentialError as error:
+        credential.verification_status = "failed"
+        credential.verification_detail = str(error)[:400]
+        db.commit()
+        raise HTTPException(status_code=503, detail=str(error))
+
+    ok, message = _verify_egp_credentials(credential.username, secret)
+    credential.verification_status = "verified" if ok else "failed"
+    credential.verification_detail = message
+    credential.last_verified_at = datetime.now(timezone.utc) if ok else None
+    db.commit()
+    return _credential_out(credential)
+
+
+@app.delete("/profiles/{profile_id}/credentials/{portal}", status_code=204)
+def delete_credential(
+    profile_id: str,
+    portal: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> None:
+    profile = _get_owned_profile(profile_id, account, db)
+    credential = db.query(models_db.PortalCredential).filter_by(
+        profile_id=profile.id, portal=portal
+    ).first()
+    if credential is None:
+        raise HTTPException(status_code=404, detail="no credentials stored for this portal")
+    db.delete(credential)
+    db.commit()
+
+
 @app.get("/profile-types")
 def list_profile_types() -> list[dict]:
     """Offered on the onboarding screen. Public: it's what the product is."""
@@ -489,6 +637,10 @@ class NotificationOut(BaseModel):
 
 # Indirection so tests can swap the network-touching halves of the cycle,
 # same pattern as `discover` on the older single-tenant path.
+# Injection point, same reason as the two below: tests must never make a real
+# login attempt against a live government portal.
+_verify_egp_credentials = egp_session.verify_credentials
+
 _pipeline_search = pipeline_module.discover
 _pipeline_fetch = pipeline_module.fetch_public_page
 

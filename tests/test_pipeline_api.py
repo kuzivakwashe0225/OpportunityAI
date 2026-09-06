@@ -305,3 +305,161 @@ def test_another_account_cannot_read_a_profiles_schema():
     client.cookies.clear()
 
     assert client.get(f"/profiles/{profile['id']}/schema").status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# eGP credentials: the owner's own portal login, stored encrypted
+# ---------------------------------------------------------------------------
+
+import pytest
+
+from opportunity_agent import credentials as credentials_module
+
+
+@pytest.fixture
+def key(monkeypatch):
+    k = credentials_module.generate_key()
+    monkeypatch.setenv(credentials_module.KEY_ENV_VAR, k)
+    return k
+
+
+def _tender_profile():
+    return client.post(
+        "/profiles", json={"profile_type": "tender", "display_name": "Tenders"}
+    ).json()
+
+
+def test_credentials_can_be_stored_and_reported_without_the_password(key):
+    profile = _tender_profile()
+
+    saved = client.put(f"/profiles/{profile['id']}/credentials/egp",
+                       json={"username": "meshcloud", "password": "sup3rs3cret"})
+
+    assert saved.status_code == 200
+    body = saved.json()
+    assert body["username"] == "meshcloud"
+    assert body["has_password"] is True
+    assert body["verification_status"] == "untested"
+    # The whole point: no endpoint anywhere hands the password back.
+    assert "sup3rs3cret" not in saved.text
+    assert "password" not in body
+    assert "secret_ciphertext" not in body
+
+
+def test_the_password_is_encrypted_in_the_database_not_stored_in_clear(key):
+    profile = _tender_profile()
+    client.put(f"/profiles/{profile['id']}/credentials/egp",
+               json={"username": "meshcloud", "password": "sup3rs3cret"})
+
+    db = db_module.SessionLocal()
+    try:
+        row = db.query(models_db.PortalCredential).filter_by(profile_id=profile["id"]).one()
+        assert "sup3rs3cret" not in row.secret_ciphertext
+        assert credentials_module.decrypt_secret(row.secret_ciphertext) == "sup3rs3cret"
+    finally:
+        db.close()
+
+
+def test_the_password_never_appears_in_any_read_endpoint(key):
+    profile = _tender_profile()
+    client.put(f"/profiles/{profile['id']}/credentials/egp",
+               json={"username": "meshcloud", "password": "sup3rs3cret"})
+
+    for path in (f"/profiles/{profile['id']}",
+                 f"/profiles/{profile['id']}/credentials",
+                 f"/profiles/{profile['id']}/schema",
+                 "/profiles"):
+        assert "sup3rs3cret" not in client.get(path).text, path
+
+
+def test_without_an_encryption_key_storing_is_refused_not_downgraded(monkeypatch):
+    """The failure that turns a database backup into a credential dump."""
+    monkeypatch.delenv(credentials_module.KEY_ENV_VAR, raising=False)
+    profile = _tender_profile()
+
+    response = client.put(f"/profiles/{profile['id']}/credentials/egp",
+                          json={"username": "meshcloud", "password": "sup3rs3cret"})
+
+    assert response.status_code == 503
+    assert credentials_module.KEY_ENV_VAR in response.json()["detail"]
+
+    db = db_module.SessionLocal()
+    try:
+        assert db.query(models_db.PortalCredential).count() == 0
+    finally:
+        db.close()
+
+
+def test_verification_is_owner_triggered_and_records_the_outcome(key, monkeypatch):
+    profile = _tender_profile()
+    client.put(f"/profiles/{profile['id']}/credentials/egp",
+               json={"username": "meshcloud", "password": "sup3rs3cret"})
+
+    seen = {}
+
+    def fake_verify(username, password):
+        seen["username"] = username
+        seen["password"] = password
+        return True, "eGP accepted these credentials"
+
+    monkeypatch.setattr(api, "_verify_egp_credentials", fake_verify)
+    body = client.post(f"/profiles/{profile['id']}/credentials/egp/verify").json()
+
+    # the real password is decrypted and handed to the portal, not a placeholder
+    assert seen == {"username": "meshcloud", "password": "sup3rs3cret"}
+    assert body["verification_status"] == "verified"
+    assert body["last_verified_at"] is not None
+
+
+def test_a_rejected_login_is_recorded_as_failed_not_verified(key, monkeypatch):
+    profile = _tender_profile()
+    client.put(f"/profiles/{profile['id']}/credentials/egp",
+               json={"username": "meshcloud", "password": "wrong"})
+    monkeypatch.setattr(api, "_verify_egp_credentials",
+                        lambda u, p: (False, "eGP rejected the credentials"))
+
+    body = client.post(f"/profiles/{profile['id']}/credentials/egp/verify").json()
+
+    assert body["verification_status"] == "failed"
+    assert body["last_verified_at"] is None
+    assert "rejected" in body["verification_detail"]
+
+
+def test_changing_the_password_resets_a_previous_verification(key, monkeypatch):
+    profile = _tender_profile()
+    client.put(f"/profiles/{profile['id']}/credentials/egp",
+               json={"username": "meshcloud", "password": "old"})
+    monkeypatch.setattr(api, "_verify_egp_credentials", lambda u, p: (True, "ok"))
+    client.post(f"/profiles/{profile['id']}/credentials/egp/verify")
+
+    body = client.put(f"/profiles/{profile['id']}/credentials/egp",
+                      json={"username": "meshcloud", "password": "new"}).json()
+
+    assert body["verification_status"] == "untested"
+    assert body["last_verified_at"] is None
+
+
+def test_credentials_can_be_removed(key):
+    profile = _tender_profile()
+    client.put(f"/profiles/{profile['id']}/credentials/egp",
+               json={"username": "meshcloud", "password": "sup3rs3cret"})
+
+    assert client.delete(f"/profiles/{profile['id']}/credentials/egp").status_code == 204
+    assert client.get(f"/profiles/{profile['id']}/credentials").json() == []
+
+
+def test_an_unknown_portal_is_refused(key):
+    profile = _tender_profile()
+    response = client.put(f"/profiles/{profile['id']}/credentials/not-a-portal",
+                          json={"username": "x", "password": "y"})
+    assert response.status_code == 422
+
+
+def test_another_account_cannot_touch_stored_credentials(key):
+    profile = _tender_profile()
+    client.put(f"/profiles/{profile['id']}/credentials/egp",
+               json={"username": "meshcloud", "password": "sup3rs3cret"})
+    client.cookies.clear()
+
+    assert client.get(f"/profiles/{profile['id']}/credentials").status_code == 401
+    assert client.delete(f"/profiles/{profile['id']}/credentials/egp").status_code == 401

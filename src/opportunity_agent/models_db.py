@@ -77,6 +77,9 @@ class Profile(Base):
     discovery_runs: Mapped[list["ProfileDiscoveryRun"]] = relationship(
         back_populates="profile", cascade="all, delete-orphan"
     )
+    credentials: Mapped[list["PortalCredential"]] = relationship(
+        back_populates="profile", cascade="all, delete-orphan"
+    )
 
 
 class Document(Base):
@@ -97,6 +100,41 @@ class Document(Base):
     uploaded_at: Mapped[datetime] = mapped_column(default=_now)
 
     profile: Mapped["Profile"] = relationship(back_populates="documents")
+
+
+class PortalCredential(Base):
+    """The owner's login for one external portal, for one profile.
+
+    Its own table rather than a couple of keys in `Profile.fields`, for one
+    concrete reason: `fields` is serialised to the browser wholesale by
+    GET /profiles/{id}, so a secret living there would be one careless
+    response away from the page source. Nothing here is returned by the API -
+    see api.py's CredentialOut, which reports only the username and whether a
+    password exists.
+
+    `secret_ciphertext` is Fernet output from credentials.py; the key lives in
+    the environment. `verification_status` records whether the credentials were
+    ever actually accepted by the portal, so the UI can say "saved but never
+    used successfully" rather than implying they work.
+    """
+
+    __tablename__ = "portal_credentials"
+    __table_args__ = (
+        UniqueConstraint("profile_id", "portal", name="uq_profile_portal_credential"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id"), nullable=False)
+    portal: Mapped[str] = mapped_column(String(50), nullable=False)
+    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    secret_ciphertext: Mapped[str] = mapped_column(String(2000), nullable=False)
+    verification_status: Mapped[str] = mapped_column(String(20), default="untested")
+    verification_detail: Mapped[str | None] = mapped_column(String(500), default=None)
+    last_verified_at: Mapped[datetime | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+
+    profile: Mapped["Profile"] = relationship(back_populates="credentials")
 
 
 class StoredOpportunity(Base):

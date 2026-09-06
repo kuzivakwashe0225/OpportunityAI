@@ -595,6 +595,8 @@
     var f=full.fields||{};
     var schema=await api("/profiles/"+p.id+"/schema");
     var docs=await api("/profiles/"+p.id+"/documents");
+    var creds=[];
+    try{ creds=await api("/profiles/"+p.id+"/credentials"); }catch(e){ creds=[]; }
 
     var outstanding = schema.missing_documents.length;
 
@@ -625,12 +627,99 @@
       "the agent reads every document it can and fills in what it learns, and never overwrites "+
       "something you typed yourself.</p>"+
       "</section>"+
+      (schema.subject==="organisation" ? credentialsPanel(creds) : "")+
       "<section class='panel'><h2>Details</h2><form id='profile-form'>"+profileFields(full,f,schema)+
       "<div class='row' style='margin-top:18px;'><button class='btn' type='submit'>Save profile</button>"+
       "<span class='status' id='profile-status'></span></div></form></section>";
 
     wireProfileForm(full, schema);
     wireDocuments(p.id);
+    if(schema.subject==="organisation") wireCredentials(p.id);
+  }
+
+  // The owner's own eGP supplier login. Stated plainly on the page rather than
+  // buried in a settings screen: this is their password to a government
+  // system, and they should be able to see exactly what it is used for and
+  // remove it in one click.
+  function credentialsPanel(creds){
+    var egp=null;
+    creds.forEach(function(c){ if(c.portal==="egp") egp=c; });
+
+    var status;
+    if(!egp){
+      status = "<p class='muted'>Not connected. Without this the agent can read the public "+
+        "tender board, but not the bid pack &mdash; the bid data sheet, specifications and "+
+        "pricing schedules all sit behind your supplier login.</p>";
+    } else if(egp.verification_status==="verified"){
+      status = "<div class='advice'><strong>Connected as "+esc(egp.username)+".</strong>"+
+        "<p class='muted' style='margin:4px 0 0;'>Last confirmed "+
+        esc(egp.last_verified_at? new Date(egp.last_verified_at).toLocaleString() : "just now")+
+        ".</p></div>";
+    } else if(egp.verification_status==="failed"){
+      status = "<div class='advice blocked'><strong>Saved as "+esc(egp.username)+
+        ", but eGP did not accept it.</strong><p class='muted' style='margin:4px 0 0;'>"+
+        esc(egp.verification_detail||"")+"</p></div>";
+    } else {
+      status = "<div class='advice'><strong>Saved as "+esc(egp.username)+
+        ", not yet tested.</strong><p class='muted' style='margin:4px 0 0;'>"+
+        "Use Test connection below to check it works before the agent relies on it.</p></div>";
+    }
+
+    return "<section class='panel'><h2>PRAZ eGP account</h2>"+
+      "<p class='muted' style='margin:-6px 0 14px;'>Your own supplier login, so the agent can "+
+      "sign in as you and fetch the tender documents. It is encrypted before it is stored, "+
+      "never shown again on this page, and never sent anywhere except eGP itself. "+
+      "The agent reads with it &mdash; it does not submit a bid.</p>"+
+      status+
+      "<div class='grid2' style='margin-top:14px;'><div>"+
+      "<label for='egp-user'>eGP username</label>"+
+      "<input id='egp-user' type='text' autocomplete='off' value='"+esc(egp?egp.username:"")+"'>"+
+      "</div><div>"+
+      "<label for='egp-pass'>eGP password</label>"+
+      "<input id='egp-pass' type='password' autocomplete='new-password' placeholder='"+
+        (egp?"Enter again to replace":"")+"'>"+
+      "</div></div>"+
+      "<div class='row' style='margin-top:16px;'>"+
+      "<button class='btn small' id='egp-save' type='button'>"+(egp?"Update":"Connect")+"</button>"+
+      (egp?"<button class='btn small ghost' id='egp-test' type='button'>Test connection</button>":"")+
+      (egp?"<button class='btn small danger' id='egp-remove' type='button'>Remove</button>":"")+
+      "<span class='status' id='egp-status'></span></div></section>";
+  }
+
+  function wireCredentials(profileId){
+    var status=$("#egp-status");
+    var save=$("#egp-save");
+    if(save) save.addEventListener("click",async function(){
+      var user=$("#egp-user").value.trim(), pass=$("#egp-pass").value;
+      if(!user){ status.textContent="Enter your eGP username."; status.className="status err"; return; }
+      if(!pass){ status.textContent="Enter your eGP password."; status.className="status err"; return; }
+      save.disabled=true; status.textContent="Saving…"; status.className="status";
+      try{
+        await api("/profiles/"+profileId+"/credentials/egp",{method:"PUT",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({username:user,password:pass})});
+        // Clear it from the DOM immediately - it is stored now, and leaving it
+        // sitting in an input is the one copy we control.
+        $("#egp-pass").value="";
+        renderRoute();
+      }catch(err){ status.textContent=err.message; status.className="status err"; save.disabled=false; }
+    });
+
+    var test=$("#egp-test");
+    if(test) test.addEventListener("click",async function(){
+      test.disabled=true; test.innerHTML="<span class='spinner'></span>Testing…";
+      status.textContent="Signing in to eGP…"; status.className="status";
+      try{ await api("/profiles/"+profileId+"/credentials/egp/verify",{method:"POST"}); renderRoute(); }
+      catch(err){ status.textContent=err.message; status.className="status err";
+                  test.disabled=false; test.textContent="Test connection"; }
+    });
+
+    var remove=$("#egp-remove");
+    if(remove) remove.addEventListener("click",async function(){
+      remove.disabled=true;
+      try{ await api("/profiles/"+profileId+"/credentials/egp",{method:"DELETE"}); renderRoute(); }
+      catch(err){ status.textContent=err.message; status.className="status err"; remove.disabled=false; }
+    });
   }
 
   // A checklist, not a file dump. The owner needs to see at a glance which
