@@ -17,6 +17,12 @@ dependencies = [
     "python-multipart>=0.0.12,<1",
     "pypdf>=5.0,<6",
     "python-docx>=1.1,<2",
+    # Fernet, for encrypting portal credentials (credentials.py). It was
+    # already present in the local venv as a transitive dependency, which is
+    # exactly why this was missed until the container crash-looped on import -
+    # the same class of bug as web/index.html missing from the built package.
+    # If a module imports it, declare it.
+    "cryptography>=42,<51",
 ]
 
 [project.optional-dependencies]
