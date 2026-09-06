@@ -15,6 +15,16 @@ services:
       # anything rather than falling back to plaintext, so the rest of the app
       # runs fine without it. Deliberately NOT `:?` for that reason.
       CREDENTIALS_SECRET_KEY: ${CREDENTIALS_SECRET_KEY:-}
+      # Outbound mail for new-account passwords. Unset means registration
+      # returns 503 rather than creating accounts whose password was never
+      # delivered - see mailer.py. Everything else runs fine without it.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      APP_URL: ${APP_URL:-https://opportunityai.meshcloud.co.zw/ui}
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-opportunity}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-opportunity-secret}
