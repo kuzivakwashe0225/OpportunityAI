@@ -1,25 +1,6 @@
 import pytest
 
 from opportunity_agent import db as db_module
-from opportunity_agent.api import store as api_store
-
-
-@pytest.fixture(autouse=True)
-def isolate_opportunity_store(tmp_path, monkeypatch):
-    """Redirect the module-level store singleton to a throwaway file per test.
-
-    Without this, api.py's `store = OpportunityStore(path=os.getenv(...,
-    ".data/store.json"))` defaults to the real dev data file whenever
-    OPPORTUNITY_AGENT_STORE_PATH isn't set - which it isn't in .env. Several
-    test files call store.reset() in setup_function, which persists an empty
-    state back to whatever store.path currently is. Without this fixture,
-    running the test suite silently wipes and rewrites real accumulated
-    discovery data in .data/store.json on every run.
-    """
-    monkeypatch.setattr(api_store, "path", tmp_path / "store.json")
-    api_store.reset()
-    yield
-    api_store.reset()
 
 
 @pytest.fixture(autouse=True)
@@ -41,3 +22,50 @@ def ensure_session_secret_key(monkeypatch):
     """auth.py refuses to run without SESSION_SECRET_KEY set - give tests a
     fixed one rather than depending on a real .env file being present."""
     monkeypatch.setenv("SESSION_SECRET_KEY", "test-only-secret-do-not-use-in-production")
+
+
+@pytest.fixture(autouse=True)
+def outbox(monkeypatch):
+    """Capture outgoing mail instead of opening a real SMTP connection.
+
+    Autouse because registration now *depends* on delivery succeeding - an
+    unstubbed test would either 503 or, far worse, try to reach a real mail
+    server from the test suite.
+    """
+    from opportunity_agent import api as api_module
+
+    sent: list[dict] = []
+    monkeypatch.setattr(api_module, "_send_mail", lambda **kwargs: sent.append(kwargs))
+    return sent
+
+
+def sign_up(client, email="owner@example.com", outbox=None):
+    """Register an account and log in with the password that was emailed.
+
+    Registration no longer accepts a password or returns a session, so every
+    test that just needs "an authenticated client" goes through here rather
+    than reproducing the two-step dance.
+    """
+    from opportunity_agent import api as api_module
+
+    captured: list[dict] = [] if outbox is None else outbox
+    if outbox is None:
+        original = api_module._send_mail
+        api_module._send_mail = lambda **kwargs: captured.append(kwargs)
+        try:
+            client.post("/register", json={"email": email})
+        finally:
+            api_module._send_mail = original
+    else:
+        client.post("/register", json={"email": email})
+
+    password = _password_from(captured[-1]["body"])
+    client.post("/login", json={"email": email, "password": password})
+    return password
+
+
+def _password_from(body: str) -> str:
+    for line in body.splitlines():
+        if line.startswith("Password:"):
+            return line.split("Password:", 1)[1].strip()
+    raise AssertionError("no password line in the welcome email")

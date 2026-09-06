@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import sign_up
 from opportunity_agent import api, models_db
 from opportunity_agent import db as db_module
 from opportunity_agent.connector import PublicPage
@@ -12,7 +13,7 @@ client = TestClient(api.app)
 
 def setup_function():
     client.cookies.clear()
-    client.post("/register", json={"email": "owner@example.com", "password": "correct horse battery staple"})
+    sign_up(client)
 
 
 def _profile():

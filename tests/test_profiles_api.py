@@ -1,15 +1,15 @@
 from fastapi.testclient import TestClient
 
-from opportunity_agent.api import app, store
+from conftest import sign_up
+from opportunity_agent.api import app
 
 
 client = TestClient(app)
 
 
 def setup_function():
-    store.reset()
     client.cookies.clear()
-    client.post("/register", json={"email": "owner@example.com", "password": "correct horse battery staple"})
+    sign_up(client)
 
 
 def test_create_profile_requires_authentication():

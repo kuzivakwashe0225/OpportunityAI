@@ -1,7 +1,8 @@
 from fastapi.testclient import TestClient
 
+from conftest import sign_up
 from opportunity_agent import api
-from opportunity_agent.api import app, store
+from opportunity_agent.api import app
 
 
 client = TestClient(app)
@@ -44,9 +45,8 @@ class FakeMinioClient:
 
 
 def setup_function(monkeypatch=None):
-    store.reset()
     client.cookies.clear()
-    client.post("/register", json={"email": "owner@example.com", "password": "correct horse battery staple"})
+    sign_up(client)
 
 
 def _make_profile():

@@ -1,15 +1,15 @@
 from fastapi.testclient import TestClient
 
-from opportunity_agent.api import app, store
+from conftest import sign_up
+from opportunity_agent.api import app
 
 
 client = TestClient(app)
 
 
 def setup_function():
-    store.reset()
     client.cookies.clear()
-    client.post("/register", json={"email": "owner@example.com", "password": "correct horse battery staple"})
+    sign_up(client)
 
 
 def test_interactive_ui_is_reachable_and_contains_the_app_shell():
@@ -40,44 +40,5 @@ def test_ui_talks_to_the_per_profile_pipeline_endpoints():
         assert endpoint in response.text, f"{endpoint} not referenced by the UI"
 
 
-def test_profile_read_endpoint_supports_frontend_bootstrap():
-    assert client.get("/profile").json() is None
-    client.put("/profile", json={"name": "Test Applicant", "goals": ["study climate technology"]})
-
-    response = client.get("/profile")
-
-    assert response.status_code == 200
-    assert response.json()["goals"] == ["study climate technology"]
 
 
-def test_interactive_ui_loads_opportunities_through_api():
-    client.put("/profile", json={"name": "Test Applicant", "country": "Zimbabwe"})
-    client.post("/opportunities", json={
-        "source": "Example Foundation",
-        "title": "STEM Award",
-        "url": "https://example.org/award",
-        "evidence": ["official page"],
-    })
-
-    response = client.get("/matches")
-
-    assert response.status_code == 200
-    assert response.json()[0]["opportunity"]["title"] == "STEM Award"
-
-
-def test_feedback_actions_update_api_state():
-    client.put("/profile", json={"name": "Test Applicant"})
-    opportunity = client.post("/opportunities", json={
-        "source": "Example Foundation",
-        "title": "STEM Award",
-        "url": "https://example.org/award",
-        "evidence": ["official page"],
-    }).json()
-
-    response = client.post(
-        f"/opportunities/{opportunity['id']}/feedback",
-        json={"decision": "shortlisted"},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["decision"] == "shortlisted"

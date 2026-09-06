@@ -1,81 +1,85 @@
-from opportunity_agent.connector import PublicPage
-from opportunity_agent.models import PersonalProfile
-from opportunity_agent.search import SearchResult
-from opportunity_agent.store import OpportunityStore
-from opportunity_agent import worker
+"""The scheduled sweep - what runs while nobody is watching.
+
+Replaces the old single-tenant `run_discovery_cycle` tests, which went with
+`store.py`. Worth noting that `run_all_profile_cycles` had *no* test coverage
+at all while the retired path had four tests; this is the function that
+actually runs in production.
+"""
+
+import pytest
+from sqlalchemy.orm import Session
+
+from opportunity_agent import db as db_module
+from opportunity_agent import models_db, worker
 
 
-def make_store(tmp_path, profile=None):
-    store = OpportunityStore(path=tmp_path / "store.json")
-    if profile is not None:
-        store.save_profile(profile)
-    return store
+@pytest.fixture
+def accounts():
+    """Two accounts, three profiles between them - so the sweep is genuinely
+    crossing account boundaries rather than looping over one person's work."""
+    with db_module.SessionLocal() as session:
+        first = models_db.Account(email="a@example.com", password_hash="x")
+        second = models_db.Account(email="b@example.com", password_hash="x")
+        session.add_all([first, second])
+        session.commit()
+
+        session.add_all([
+            models_db.Profile(
+                account_id=first.id, profile_type="scholarship",
+                display_name="Scholarships",
+                fields={"name": "Tendai", "country": "Zimbabwe"},
+            ),
+            models_db.Profile(
+                account_id=first.id, profile_type="tender", display_name="Tenders",
+                fields={"name": "Meshcloud", "country": "Zimbabwe"},
+            ),
+            models_db.Profile(
+                account_id=second.id, profile_type="job", display_name="Jobs",
+                fields={"name": "Rudo", "country": "Zimbabwe"},
+            ),
+        ])
+        session.commit()
+        yield
 
 
-def test_run_discovery_cycle_skips_when_no_profile_is_set(tmp_path):
-    store = make_store(tmp_path)
+def test_the_sweep_covers_every_profile_on_every_account(accounts, monkeypatch):
+    seen = []
 
-    run = worker.run_discovery_cycle(store, api_key="test-key")
+    def fake_cycle(session, profile, *, api_key, **kwargs):
+        seen.append(profile.display_name)
+        return models_db.ProfileDiscoveryRun(profile_id=profile.id, found=1, added=1, drafted=0)
 
-    assert run is None
+    from opportunity_agent import pipeline
+    monkeypatch.setattr(pipeline, "run_profile_cycle", fake_cycle)
 
+    cycles = worker.run_all_profile_cycles("test-key")
 
-def test_run_discovery_cycle_records_a_run_and_adds_opportunities(tmp_path, monkeypatch):
-    store = make_store(tmp_path, PersonalProfile(name="Test", country="Zimbabwe"))
-
-    def fake_discover(profile, *, api_key):
-        assert api_key == "test-key"
-        return [SearchResult(title="Award", url="https://example.org/award", content="snippet")]
-
-    def fake_fetch(url):
-        return PublicPage(
-            url=url, content="Full page text.", retrieved_at="2026-01-01T00:00:00Z",
-            sha256="abc123", content_type="text/html",
-        )
-
-    monkeypatch.setattr(worker, "discover", fake_discover)
-    monkeypatch.setattr(worker, "fetch_public_page", fake_fetch)
-
-    run = worker.run_discovery_cycle(store, api_key="test-key")
-
-    assert run is not None
-    assert run.found == 1
-    assert run.added == 1
-    assert len(store.opportunities) == 1
-    assert store.opportunities[0].opportunity.title == "Award"
+    assert cycles == 3
+    assert sorted(seen) == ["Jobs", "Scholarships", "Tenders"]
 
 
-def test_run_discovery_cycle_records_search_failure_without_raising(tmp_path, monkeypatch):
-    store = make_store(tmp_path, PersonalProfile(name="Test"))
+def test_one_failing_profile_does_not_stop_the_others(accounts, monkeypatch):
+    """The property the whole schedule depends on: an unreachable source or a
+    malformed profile must cost that profile's run, not everyone else's."""
+    from opportunity_agent import pipeline
 
-    def failing_discover(profile, *, api_key):
-        raise RuntimeError("search API unreachable")
+    def flaky(session, profile, *, api_key, **kwargs):
+        if profile.display_name == "Tenders":
+            raise RuntimeError("eGP unreachable")
+        return models_db.ProfileDiscoveryRun(profile_id=profile.id, found=1, added=0, drafted=0)
 
-    monkeypatch.setattr(worker, "discover", failing_discover)
+    monkeypatch.setattr(pipeline, "run_profile_cycle", flaky)
 
-    run = worker.run_discovery_cycle(store, api_key="test-key")
-
-    assert run is not None
-    assert run.found == 0
-    assert run.added == 0
-    assert "search API unreachable" in run.failures[0]
+    assert worker.run_all_profile_cycles("test-key") == 2
 
 
-def test_run_discovery_cycle_records_per_result_fetch_failures(tmp_path, monkeypatch):
-    store = make_store(tmp_path, PersonalProfile(name="Test"))
+def test_a_profile_that_is_not_set_up_is_skipped_quietly(accounts, monkeypatch):
+    from opportunity_agent import pipeline
+    monkeypatch.setattr(pipeline, "run_profile_cycle",
+                        lambda session, profile, *, api_key, **kwargs: None)
 
-    def fake_discover(profile, *, api_key):
-        return [SearchResult(title="Broken", url="https://example.org/broken", content="")]
+    assert worker.run_all_profile_cycles("test-key") == 0
 
-    def failing_fetch(url):
-        raise ValueError("blocked by robots.txt")
 
-    monkeypatch.setattr(worker, "discover", fake_discover)
-    monkeypatch.setattr(worker, "fetch_public_page", failing_fetch)
-
-    run = worker.run_discovery_cycle(store, api_key="test-key")
-
-    assert run.found == 1
-    assert run.added == 0
-    assert len(run.failures) == 1
-    assert "blocked by robots.txt" in run.failures[0]
+def test_the_sweep_works_with_no_accounts_at_all():
+    assert worker.run_all_profile_cycles("test-key") == 0

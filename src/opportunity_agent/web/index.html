@@ -192,11 +192,41 @@
     <form id="register-form" hidden>
       <label for="register-email">Email</label>
       <input id="register-email" type="text" autocomplete="username">
-      <label for="register-password">Password</label>
-      <input id="register-password" type="password" autocomplete="new-password">
+      <p class="muted" style="margin:8px 0 0;font-size:.84rem;">
+        We'll email you a password to sign in with. You can change it once you're in.
+      </p>
       <div class="row" style="margin-top:16px;">
         <button class="btn" type="submit">Create account</button>
         <span class="status" id="register-status"></span>
+      </div>
+    </form>
+    <div id="register-sent" hidden>
+      <div class="advice"><strong>Check your email.</strong>
+        <p class="muted" style="margin:6px 0 0;">We've sent a password to
+          <span id="register-sent-email"></span>. Sign in with it, and you'll be
+          asked to choose your own.</p></div>
+      <div class="row" style="margin-top:16px;">
+        <button class="btn" id="register-sent-login" type="button">Go to sign in</button>
+      </div>
+    </div>
+
+    <!-- Shown after a first sign-in, while the account is still on the
+         password that arrived by email. -->
+    <form id="setpw-form" hidden>
+      <p class="muted" style="margin:0 0 6px;">
+        You're signed in with the password we emailed you. That one travelled in
+        clear, so it's worth replacing now.
+      </p>
+      <label for="setpw-current">Emailed password</label>
+      <input id="setpw-current" type="password" autocomplete="current-password">
+      <label for="setpw-new">Choose a new password</label>
+      <input id="setpw-new" type="password" autocomplete="new-password">
+      <label for="setpw-confirm">Confirm it</label>
+      <input id="setpw-confirm" type="password" autocomplete="new-password">
+      <div class="row" style="margin-top:16px;">
+        <button class="btn" type="submit">Save password</button>
+        <button class="btn plain" id="setpw-skip" type="button">Skip for now</button>
+        <span class="status" id="setpw-status"></span>
       </div>
     </form>
     <p class="muted" style="margin-top:18px;" id="auth-toggle-row">
@@ -1089,37 +1119,90 @@
     catch(err){ showAuth(); }
   }
 
+  // The auth panel has four mutually-exclusive states now, so switching is one
+  // function rather than four pairs of hidden flags getting out of step.
+  function showAuthPanel(which){
+    var panels={login:"#login-form",register:"#register-form",
+                sent:"#register-sent",setpw:"#setpw-form"};
+    Object.keys(panels).forEach(function(k){ $(panels[k]).hidden = (k!==which); });
+    $("#auth-toggle-row").hidden  = which!=="login";
+    $("#auth-toggle-back").hidden = which!=="register";
+    $("#auth-heading").textContent =
+      which==="register" ? "Create your account" :
+      which==="sent"     ? "Account created" :
+      which==="setpw"    ? "Choose your password" : "Log in";
+  }
+
   $("#login-form").addEventListener("submit",async function(e){
     e.preventDefault();
     var s=$("#login-status"); s.textContent="Logging in…"; s.className="status";
     try{
-      await api("/login",{method:"POST",headers:{"Content-Type":"application/json"},
+      var account = await api("/login",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({email:$("#login-email").value.trim(),password:$("#login-password").value})});
-      s.textContent=""; await checkAuth();
+      s.textContent="";
+      if(account && account.must_change_password){
+        // Carry the emailed password across so they don't retype it, then
+        // drop it from the login field.
+        $("#setpw-current").value = $("#login-password").value;
+        $("#login-password").value = "";
+        state.account = account;
+        showAuthPanel("setpw");
+        return;
+      }
+      $("#login-password").value = "";
+      await checkAuth();
     }catch(err){ s.textContent=err.message; s.className="status err"; }
   });
+
   $("#register-form").addEventListener("submit",async function(e){
     e.preventDefault();
     var s=$("#register-status"); s.textContent="Creating account…"; s.className="status";
     try{
+      var email=$("#register-email").value.trim();
       await api("/register",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({email:$("#register-email").value.trim(),password:$("#register-password").value})});
-      s.textContent=""; await checkAuth();
+        body:JSON.stringify({email:email})});
+      s.textContent="";
+      $("#register-sent-email").textContent=email;
+      $("#login-email").value=email;
+      showAuthPanel("sent");
     }catch(err){ s.textContent=err.message; s.className="status err"; }
   });
-  $("#show-register-btn").addEventListener("click",function(){
-    $("#login-form").hidden=true; $("#auth-toggle-row").hidden=true;
-    $("#register-form").hidden=false; $("#auth-toggle-back").hidden=false;
-    $("#auth-heading").textContent="Create your account";
+
+  $("#register-sent-login").addEventListener("click",function(){
+    showAuthPanel("login"); $("#login-password").focus();
   });
-  $("#show-login-btn").addEventListener("click",function(){
-    $("#register-form").hidden=true; $("#auth-toggle-back").hidden=true;
-    $("#login-form").hidden=false; $("#auth-toggle-row").hidden=false;
-    $("#auth-heading").textContent="Log in";
+
+  $("#setpw-form").addEventListener("submit",async function(e){
+    e.preventDefault();
+    var s=$("#setpw-status");
+    var current=$("#setpw-current").value, next=$("#setpw-new").value;
+    if(next !== $("#setpw-confirm").value){
+      s.textContent="Those two don't match."; s.className="status err"; return;
+    }
+    s.textContent="Saving…"; s.className="status";
+    try{
+      await api("/change-password",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({current_password:current,new_password:next})});
+      // Nothing typed here stays in the DOM once it has been stored.
+      $("#setpw-current").value=""; $("#setpw-new").value=""; $("#setpw-confirm").value="";
+      await checkAuth();
+    }catch(err){ s.textContent=err.message; s.className="status err"; }
   });
+
+  // "if they want" - the prompt is the default, not a wall. They are already
+  // authenticated at this point; skipping just leaves the flag set so they get
+  // asked again next time.
+  $("#setpw-skip").addEventListener("click",async function(){
+    $("#setpw-current").value=""; $("#setpw-new").value=""; $("#setpw-confirm").value="";
+    await checkAuth();
+  });
+
+  $("#show-register-btn").addEventListener("click",function(){ showAuthPanel("register"); });
+  $("#show-login-btn").addEventListener("click",function(){ showAuthPanel("login"); });
   $("#logout-btn").addEventListener("click",async function(){
     try{ await api("/logout",{method:"POST"}); }catch(e){}
     state=({account:null,profiles:[],activeProfileId:null,notifications:[],opportunities:[],summary:null});
+    showAuthPanel("login");
     showAuth();
   });
 

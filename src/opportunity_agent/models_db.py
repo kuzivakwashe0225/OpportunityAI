@@ -41,6 +41,15 @@ class Account(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # True while the account is still on the password that was emailed to it.
+    # That password travelled over email in clear, so it is treated as a
+    # delivery mechanism rather than a credential: the UI prompts to replace
+    # it at first login, and this flag is what it asks.
+    must_change_password: Mapped[bool] = mapped_column(default=False)
+    # When the emailed password stops working. A temporary password that never
+    # expires is just a permanent password with worse handling.
+    temp_password_expires_at: Mapped[datetime | None] = mapped_column(default=None)
+    password_set_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=_now)
 
     profiles: Mapped[list["Profile"]] = relationship(

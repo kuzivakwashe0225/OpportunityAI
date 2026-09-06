@@ -1,26 +1,30 @@
 from fastapi.testclient import TestClient
 
-from opportunity_agent.api import app, store
+from conftest import sign_up
+
+from opportunity_agent.api import app
 
 
 client = TestClient(app)
 
 
 def setup_function():
-    store.reset()
     client.cookies.clear()
 
 
-def register(email="owner@example.com", password="correct horse battery staple"):
-    return client.post("/register", json={"email": email, "password": password})
+def register(email="owner@example.com"):
+    return client.post("/register", json={"email": email})
 
 
-def test_register_creates_the_first_account_and_logs_in():
+def test_register_creates_an_account_without_logging_it_in():
+    """Changed deliberately: registration used to log the caller straight in.
+    It now emails a password instead, which is also how it proves the person
+    controls the address - so no session comes back."""
     response = register()
 
     assert response.status_code == 201
     assert response.json()["email"] == "owner@example.com"
-    assert "session" in response.cookies
+    assert "session" not in response.cookies
 
 
 def test_register_password_is_never_returned():
@@ -30,12 +34,11 @@ def test_register_password_is_never_returned():
     assert "password_hash" not in response.json()
 
 
-def test_registration_is_closed_after_the_first_account_exists():
-    register(email="first@example.com")
-
-    response = register(email="second@example.com")
-
-    assert response.status_code == 403
+def test_registration_is_open_to_more_than_one_account():
+    """The single-account cap is gone. It existed because the legacy endpoints
+    shared one global store; that store has been deleted."""
+    assert register(email="first@example.com").status_code == 201
+    assert register(email="second@example.com").status_code == 201
 
 
 def test_registering_the_same_email_twice_is_rejected():
@@ -44,20 +47,17 @@ def test_registering_the_same_email_twice_is_rejected():
     register(email="owner@example.com")
     client.cookies.clear()
 
-    response = client.post(
-        "/register", json={"email": "owner@example.com", "password": "a different password"}
-    )
+    response = client.post("/register", json={"email": "owner@example.com"})
 
-    assert response.status_code in (403, 409)
+    assert response.status_code == 409
 
 
-def test_login_with_correct_credentials_succeeds():
+def test_login_with_correct_credentials_succeeds(outbox):
     register()
     client.cookies.clear()
+    password = outbox[-1]["body"].split("Password:")[1].splitlines()[0].strip()
 
-    response = client.post(
-        "/login", json={"email": "owner@example.com", "password": "correct horse battery staple"}
-    )
+    response = client.post("/login", json={"email": "owner@example.com", "password": password})
 
     assert response.status_code == 200
     assert "session" in response.cookies
@@ -85,7 +85,7 @@ def test_me_requires_authentication():
 
 
 def test_me_returns_the_logged_in_account():
-    register()
+    sign_up(client)
 
     response = client.get("/me")
 
@@ -94,7 +94,7 @@ def test_me_returns_the_logged_in_account():
 
 
 def test_logout_clears_the_session():
-    register()
+    sign_up(client)
 
     client.post("/logout")
     response = client.get("/me")
@@ -107,41 +107,10 @@ def test_health_and_ui_stay_unauthenticated():
     assert client.get("/ui").status_code == 200
 
 
-def test_profile_endpoints_require_authentication():
-    assert client.get("/profile").status_code == 401
-    assert client.put("/profile", json={"name": "Test"}).status_code == 401
 
 
-def test_discover_endpoint_requires_authentication():
-    assert client.post("/discover").status_code == 401
 
 
-def test_matches_and_digest_endpoints_require_authentication():
-    assert client.get("/matches").status_code == 401
-    assert client.get("/digest").status_code == 401
-
-
-def test_runs_endpoint_requires_authentication():
-    assert client.get("/runs").status_code == 401
-
-
-def test_opportunities_endpoints_require_authentication():
-    assert client.post("/opportunities", json={
-        "source": "x", "title": "x", "url": "https://example.org", "evidence": ["x"],
-    }).status_code == 401
-    assert client.get("/opportunities/whatever/package").status_code == 401
-    assert client.post("/opportunities/whatever/feedback", json={"decision": "shortlisted"}).status_code == 401
-
-
-def test_authenticated_session_reaches_the_existing_endpoints():
-    register()
-
-    response = client.put("/profile", json={"name": "Test Applicant"})
-
-    assert response.status_code == 200
-    assert client.get("/matches").status_code == 200
-    assert client.get("/digest").status_code == 200
-    assert client.get("/runs").status_code == 200
 
 
 def test_invalid_session_cookie_is_rejected_not_crashed():

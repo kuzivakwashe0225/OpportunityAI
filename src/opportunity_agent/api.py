@@ -1,5 +1,6 @@
 import os
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import jwt
@@ -15,28 +16,27 @@ load_dotenv()
 from . import auth as auth_module
 from . import db as db_module
 from . import credentials as credentials_module
+from . import mailer
 from . import documents as documents_module
 from . import models_db
 from . import pipeline as pipeline_module
 from . import profile_schema
-from .digest import build_digest
-from .discovery import build_search_queries, discover
 from .connector import fetch_public_page
 from .document_text import extract_text
-from .drafting import build_application_package
 from . import egp_session
-from .extraction import PARSER_VERSION, page_to_opportunity
 from .extraction_llm import ExtractedFacts, extract_facts_from_text
-from .matching import match_opportunity
-from .models import Opportunity, PersonalProfile
-from .store import OpportunityStore
 
 app = FastAPI(title="OpportunityAI")
-store = OpportunityStore(path=os.getenv("OPPORTUNITY_AGENT_STORE_PATH", ".data/store.json"))
 _UI_PAGE = (Path(__file__).parent / "web" / "index.html").read_text(encoding="utf-8")
 db_module.init_db()
 
 SESSION_COOKIE = "session"
+TEMP_PASSWORD_TTL = timedelta(days=7)
+MIN_PASSWORD_LENGTH = 10
+APP_URL = os.getenv("APP_URL", "https://opportunityai.meshcloud.co.zw/ui")
+
+# Injection point so tests never open a real SMTP connection.
+_send_mail = mailer.send
 DOCUMENTS_BUCKET = "opportunityai-documents"
 MAX_DOCUMENT_BYTES = 10 * 1024 * 1024  # 10MB
 _SUPPORTED_DOCUMENT_TYPES = {
@@ -65,13 +65,11 @@ def _extract_facts_from_document(content: bytes, content_type: str) -> Extracted
     )
 
 
-class Feedback(BaseModel):
-    decision: str
-
-
 class RegisterRequest(BaseModel):
+    # No password: the user does not choose one at registration. The system
+    # generates it and emails it to them, which is also how it confirms they
+    # actually control the address.
     email: str
-    password: str
 
 
 class LoginRequest(BaseModel):
@@ -82,6 +80,16 @@ class LoginRequest(BaseModel):
 class AccountOut(BaseModel):
     id: str
     email: str
+    # Lets the frontend send a first-time user straight to "choose a password"
+    # instead of leaving them on one that arrived in an email in clear.
+    must_change_password: bool = False
+
+    model_config = {"from_attributes": True}
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 
 def get_db_session() -> Session:
@@ -137,28 +145,134 @@ def health() -> dict[str, str]:
 
 
 @app.post("/register", response_model=AccountOut, status_code=201)
-def register(payload: RegisterRequest, response: Response, db: Session = Depends(get_db_session)) -> models_db.Account:
-    if db.query(models_db.Account).count() > 0:
-        raise HTTPException(
-            status_code=403,
-            detail="registration is closed - this deployment supports one account until "
-            "the pipeline is multi-tenant (SOLUTION_DEFINITION.md §14)",
-        )
-    if db.query(models_db.Account).filter_by(email=payload.email).first() is not None:
+def register(payload: RegisterRequest, db: Session = Depends(get_db_session)) -> models_db.Account:
+    """Create an account and email its first password to the address given.
+
+    The password is generated here, not chosen by the caller, and it is never
+    in this response - it goes to the mailbox and nowhere else. That is also
+    what makes registration prove control of the address: you cannot get in
+    without reading the mail.
+
+    Note this deliberately does NOT log the new user in. Auto-login would make
+    the emailed password decorative and let anyone register an address they do
+    not own and walk straight in.
+    """
+    email = payload.email.strip().lower()
+    if "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(status_code=422, detail="a valid email address is required")
+    if db.query(models_db.Account).filter_by(email=email).first() is not None:
+        # Note this does leak whether an address is registered. That is a
+        # deliberate trade for a system with a named, known set of users: the
+        # alternative - reporting success and sending nothing - makes "I never
+        # got the email" unanswerable.
         raise HTTPException(status_code=409, detail="an account with this email already exists")
-    account = models_db.Account(email=payload.email, password_hash=auth_module.hash_password(payload.password))
+
+    temporary = generate_temporary_password()
+    account = models_db.Account(
+        email=email,
+        password_hash=auth_module.hash_password(temporary),
+        must_change_password=True,
+        temp_password_expires_at=datetime.now(timezone.utc) + TEMP_PASSWORD_TTL,
+    )
+
+    # Send *before* committing. An account whose password was never delivered
+    # is one nobody can log into, and reporting success for that is worse than
+    # refusing outright.
+    try:
+        _send_mail(
+            to=email,
+            subject="Your OpportunityAI password",
+            body=_welcome_email(email, temporary),
+        )
+    except mailer.MailError as error:
+        db.rollback()
+        raise HTTPException(status_code=503, detail=str(error))
+
     db.add(account)
     db.commit()
-    _set_session_cookie(response, account.id)
     return account
+
+
+def generate_temporary_password() -> str:
+    """A readable, unambiguous, high-entropy temporary password.
+
+    Excludes characters that are misread when copied out of an email by hand -
+    O/0, l/1/I - because that is exactly how this one gets used.
+    """
+    alphabet = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(16))
+
+
+def _welcome_email(email: str, password: str) -> str:
+    lines = [
+        "Welcome to OpportunityAI.",
+        "",
+        "Your account is ready. Sign in with:",
+        "",
+        f"Email: {email}",
+        f"Password: {password}",
+        "",
+        APP_URL,
+        "",
+        f"This password expires in {TEMP_PASSWORD_TTL.days} days. You will be asked to",
+        "replace it when you first sign in - please do. This one travelled by",
+        "email, so anyone who can read this message can use it until you do.",
+        "",
+        "If you did not ask for this account, you can ignore this email.",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 @app.post("/login", response_model=AccountOut)
 def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db_session)) -> models_db.Account:
-    account = db.query(models_db.Account).filter_by(email=payload.email).first()
+    account = db.query(models_db.Account).filter_by(email=payload.email.strip().lower()).first()
     if account is None or not auth_module.verify_password(payload.password, account.password_hash):
         raise HTTPException(status_code=401, detail="invalid email or password")
+
+    expiry = account.temp_password_expires_at
+    if expiry is not None:
+        # SQLite hands back naive datetimes; Postgres may too depending on the
+        # column type. Compare in UTC either way rather than crashing on a
+        # naive/aware subtraction during a login.
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        if expiry < datetime.now(timezone.utc):
+            raise HTTPException(
+                status_code=401,
+                detail="this temporary password has expired - ask for a new one",
+            )
+
     _set_session_cookie(response, account.id)
+    return account
+
+
+@app.post("/change-password", response_model=AccountOut)
+def change_password(
+    payload: ChangePasswordRequest,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> models_db.Account:
+    """Replace the current password with one the user chose.
+
+    Requires the current password even though the caller is already
+    authenticated: without that, a stolen session cookie is enough to take the
+    account over permanently.
+    """
+    if not auth_module.verify_password(payload.current_password, account.password_hash):
+        raise HTTPException(status_code=401, detail="current password is incorrect")
+    if len(payload.new_password) < MIN_PASSWORD_LENGTH:
+        raise HTTPException(
+            status_code=422,
+            detail=f"the new password must be at least {MIN_PASSWORD_LENGTH} characters",
+        )
+
+    account.password_hash = auth_module.hash_password(payload.new_password)
+    account.must_change_password = False
+    # Only the *emailed* password was temporary. Leaving the clock running
+    # would lock the user out a week after they chose a good one.
+    account.temp_password_expires_at = None
+    account.password_set_at = datetime.now(timezone.utc)
+    db.commit()
     return account
 
 
@@ -825,152 +939,3 @@ def review_ui() -> str:
     earlier server-rendered /ui.
     """
     return _UI_PAGE
-
-
-@app.get("/profile", response_model=PersonalProfile | None)
-def get_profile(account: models_db.Account = Depends(get_current_account)) -> PersonalProfile | None:
-    return store.profile
-
-
-@app.put("/profile", response_model=PersonalProfile)
-def save_profile(
-    profile: PersonalProfile, account: models_db.Account = Depends(get_current_account)
-) -> PersonalProfile:
-    return store.save_profile(profile)
-
-
-@app.post("/opportunities", status_code=201)
-def add_opportunity(
-    opportunity: Opportunity, account: models_db.Account = Depends(get_current_account)
-) -> dict[str, object]:
-    stored = store.add_opportunity(opportunity)
-    return {"id": stored.id, "opportunity": stored.opportunity}
-
-
-@app.post("/discover")
-def run_discovery(account: models_db.Account = Depends(get_current_account)) -> dict[str, object]:
-    if store.profile is None:
-        raise HTTPException(status_code=409, detail="profile is required")
-    api_key = os.getenv("TAVILY_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=503, detail="TAVILY_API_KEY is not configured")
-    started_at = datetime.now(timezone.utc).isoformat()
-    queries = build_search_queries(store.profile)
-    try:
-        results = discover(store.profile, api_key=api_key)
-    except Exception as error:
-        run = store.record_run(
-            queries=queries,
-            found=0,
-            added=0,
-            failures=[f"search: {error}"],
-            started_at=started_at,
-            sources=[],
-        )
-        raise HTTPException(status_code=502, detail=f"discovery failed; run {run.id}") from error
-    added = []
-    failures = []
-    sources = []
-    for result in results:
-        try:
-            page = fetch_public_page(result.url)
-            title = result.title or "Untitled scholarship opportunity"
-            opportunity = page_to_opportunity(page, title=title)
-        except Exception as error:
-            failures.append(f"{result.url}: {error}")
-            sources.append({"url": result.url, "status": "failed", "error": str(error)})
-            continue
-        try:
-            added.append(store.add_opportunity(opportunity))
-        except Exception as error:
-            failures.append(f"{result.url}: {error}")
-            sources.append({"url": result.url, "status": "failed", "error": str(error)})
-            continue
-        sources.append({
-            "url": page.url,
-            "status": "parsed",
-            "content_type": page.content_type,
-            "parser_version": PARSER_VERSION,
-        })
-    run = store.record_run(
-        queries=queries,
-        found=len(results),
-        added=len(added),
-        failures=failures,
-        started_at=started_at,
-        sources=sources,
-    )
-    return {
-        "run_id": run.id,
-        "found": len(results),
-        "added": len(added),
-        "opportunities": [stored.opportunity for stored in added],
-    }
-
-
-@app.get("/runs")
-def get_runs(account: models_db.Account = Depends(get_current_account)) -> list[dict[str, object]]:
-    return [run.__dict__ for run in reversed(store.runs)]
-
-
-@app.get("/opportunities/{opportunity_id}/package")
-def get_application_package(
-    opportunity_id: str, account: models_db.Account = Depends(get_current_account)
-):
-    if store.profile is None:
-        raise HTTPException(status_code=409, detail="profile is required")
-    try:
-        stored = store.get_opportunity(opportunity_id)
-    except KeyError as error:
-        raise HTTPException(status_code=404, detail="opportunity not found") from error
-    match = match_opportunity(stored.opportunity, store.profile)
-    return build_application_package(store.profile, stored.opportunity, match)
-
-
-@app.get("/matches")
-def get_matches(account: models_db.Account = Depends(get_current_account)) -> list[dict[str, object]]:
-    try:
-        matches = store.matches()
-    except ValueError as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
-    return [
-        {
-            "id": stored.id,
-            "opportunity": stored.opportunity,
-            "match": result,
-            "decision": stored.decision,
-            "usefulness": stored.usefulness,
-        }
-        for stored, result in matches
-    ]
-
-
-@app.post("/opportunities/{opportunity_id}/feedback")
-def record_feedback(
-    opportunity_id: str, feedback: Feedback, account: models_db.Account = Depends(get_current_account)
-) -> dict[str, str]:
-    if feedback.decision not in {"shortlisted", "dismissed", "useful", "not_useful"}:
-        raise HTTPException(status_code=422, detail="unsupported feedback decision")
-    try:
-        stored = store.set_feedback(opportunity_id, feedback.decision)
-    except KeyError as error:
-        raise HTTPException(status_code=404, detail="opportunity not found") from error
-    return {
-        "id": stored.id,
-        "decision": stored.decision or "",
-        "usefulness": stored.usefulness or "",
-    }
-
-
-@app.get("/digest")
-def get_digest(account: models_db.Account = Depends(get_current_account)) -> dict[str, str]:
-    try:
-        matches = store.matches()
-    except ValueError as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
-    content = build_digest([
-        (stored.opportunity, result)
-        for stored, result in matches
-        if stored.decision != "dismissed"
-    ])
-    return {"content": content}
