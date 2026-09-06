@@ -46,6 +46,16 @@ To ship a change to production: push to `master`, then on the server
 Registration is capped at one account (see the auth review note below) - it
 may already be claimed by the owner; don't consume it testing.
 
+Two deploy traps already paid for, both the same shape - something present in
+the local venv but absent from the built image (`web/index.html` via package
+data, then `cryptography` as an undeclared transitive dependency, which
+crash-looped the live API on import). Neither was catchable by the test suite.
+**If a module imports it, declare it, and check `docker compose logs api`
+after every deploy.** Also: `create_all()` creates missing *tables* but never
+missing *columns* - adding a column needs a manual `ALTER TABLE` against the
+live Postgres (`docker compose exec db psql -U opportunity -d opportunity_agent`;
+note the database is `opportunity_agent`, not `opportunity`).
+
 Also worth knowing: **Ollama is already running on that server** (port 11434,
 found while checking for port conflicts) - relevant whenever the deferred
 document-extraction work (SOLUTION_DEFINITION.md §14) actually starts.
@@ -136,6 +146,7 @@ Don't assume auth applies to those endpoints just because it exists now.
 | PRAZ eGP tender source | `egp.py` | Claude | **done and live-verified** - 884 public tenders, board + detail pages. Two traps found only by using real markup: `data-label` attributes are shifted against the page's own `<thead>` (parse by column position), and category codes can be multi-valued ("SH001 ,SP001 ,SV001"). Strips HTML comments before parsing - the page hides its contact person in one, and that is not ours to lift. **Bid documents themselves need a logged-in PRAZ supplier account**; only the listing is public |
 | Compliance advisor | `compliance.py` | Claude | **done** - "what to do and what to upload" from parsed facts only. Blockers (wrong PRAZ category, closed tender) kept separate from actions (upload this, pay that). Hard rule: every line traces to a published fact or an owner-entered field. Never invent a plausible-sounding requirement - the owner will go and act on it |
 | Missing-document request loop | `pipeline.py`, `api.py` | Claude | **done** - stage `needs_documents`, a notification naming the paper the way the owner's filing cabinet does, and `resume_after_documents()` so an upload unblocks drafts without anyone asking |
+| eGP account connection (owner's own credentials) | `credentials.py`, `egp_session.py`, `api.py`, `web/index.html` | Claude | **done and live** - Fernet-encrypted, key in `CREDENTIALS_SECRET_KEY` (generated on the server, in `.env`, never in git). **A missing key refuses to store rather than falling back to plaintext** - do not "fix" that. No endpoint returns the secret. Verification is owner-triggered on purpose: repeated failed logins can lock their real PRAZ supplier account, so never put it on a schedule. The login flow is tested only against mocks - never point the test suite at the live endpoint with invented credentials. **Still unverified against the real server** until the owner enters a real password |
 | Auto-filling application forms on the opportunity site | not started | **open, and read this first** | the natural next step, and the honest scoping is: reading a page for its forms and downloadable packs is straightforward and worth doing. *Submitting* is not. Evidence in SOLUTION_DEFINITION.md §17 - a funded 9-person team at $5M ARR doing only this still cannot reliably auto-submit. For eGP specifically the bid pack is behind a supplier login, so any automation needs the owner's PRAZ credentials, which is a security decision to put to them, not an implementation detail to assume |
 | Learning from feedback | not started | open | signal is already being collected (`usefulness`, decision history, escalations) and nothing consumes it. Be honest about scale before building: tens of opportunities a week is not training data. The achievable version is inspectable heuristics - down-weight sources always dismissed, up-weight terms in what gets approved - as a layer *above* the hard eligibility rules, never replacing them. See SOLUTION_DEFINITION.md §16 |
 
