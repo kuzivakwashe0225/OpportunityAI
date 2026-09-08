@@ -12,6 +12,16 @@ test; qwen2.5:0.5b (397MB) is what's actually verified safe to run there
 (confirmed live: memory barely moved across a real call). Extraction quality
 is correspondingly modest for a model this small - conservative parsing
 (returning less rather than guessing) matters more than usual here.
+
+We talk to ``/api/chat``, not ``/api/generate``, so that a *reasoning* model
+can be swapped in via ``OLLAMA_MODEL`` without changing this file. On
+``/api/generate`` a reasoning model streams its raw chain-of-thought into
+``response`` and the JSON never arrives - verified against ``gpt-oss:20b``,
+which returned ``"The user says: ..."`` instead of an object. ``/api/chat``
+splits that off into ``message.thinking`` and leaves ``message.content``
+clean. Non-reasoning models answer the same way on both endpoints, so
+qwen2.5:0.5b is unaffected. (Do not "help" by sending ``think: false`` -
+against gpt-oss:20b that produced an empty response and zero eval tokens.)
 """
 
 from __future__ import annotations
@@ -24,6 +34,11 @@ from pydantic import BaseModel, Field
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_MODEL = "qwen2.5:0.5b"
 _MAX_INPUT_CHARS = 6000
+# Generous because this call is synchronous inside the extract request, and a
+# reasoning model spends tokens thinking before it emits any JSON: one real
+# CV through gpt-oss:20b took 185s on a contended box, which the previous
+# 120s would have cut off mid-answer.
+_TIMEOUT_SECONDS = 300.0
 
 _PROMPT_TEMPLATE = """You extract facts from a CV or personal document. Read the text below and \
 return ONLY a JSON object with these fields. Use [] or null for anything not clearly present - \
@@ -90,11 +105,16 @@ def extract_facts_from_text(
     prompt = _PROMPT_TEMPLATE.format(text=text[:_MAX_INPUT_CHARS])
 
     owns_client = client is None
-    http_client = client or httpx.Client(timeout=120.0)  # local CPU inference can be slow
+    http_client = client or httpx.Client(timeout=_TIMEOUT_SECONDS)
     try:
         response = http_client.post(
-            f"{base_url}/api/generate",
-            json={"model": model, "prompt": prompt, "stream": False, "format": "json"},
+            f"{base_url}/api/chat",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+                "format": "json",
+            },
         )
         response.raise_for_status()
         payload = response.json()
@@ -102,8 +122,13 @@ def extract_facts_from_text(
         if owns_client:
             http_client.close()
 
+    # Only message.content is the answer. A reasoning model's message also
+    # carries a "thinking" field, which is deliberately ignored.
+    message = payload.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+
     try:
-        parsed = json.loads(payload.get("response", ""))
+        parsed = json.loads(content)
     except (json.JSONDecodeError, TypeError):
         return ExtractedFacts()
 
