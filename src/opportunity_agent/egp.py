@@ -245,6 +245,26 @@ def _parse_date(raw: str) -> date | None:
         return None
 
 
+def parse_table_rows(html: str) -> list[list[str]]:
+    """Every non-header row of the page's tables, as lists of cell text.
+
+    Public because egp_awards.py needs exactly this: the award notices page is
+    the same shape of plain server-rendered table, and writing a second parser
+    for it would be duplicating a thing already proven against real markup.
+    """
+    parser = _BoardParser()
+    parser.feed(html)
+    return parser.rows
+
+
+def parse_board_date(raw: str) -> date | None:
+    """The board's date format, shared with egp_awards.py.
+
+    Both pages render dates the same way, so they parse them the same way.
+    """
+    return _parse_date(raw)
+
+
 def parse_bulletin_board(html: str) -> list[Tender]:
     parser = _BoardParser()
     parser.feed(html)
