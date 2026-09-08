@@ -38,6 +38,13 @@ from .egp import BASE_URL
 
 LOGIN_PATH = "/Indexes/login"
 LOGIN_POST_PATH = "/users/login"
+
+# The login form's role dropdown, <select name="type">. eGP spells the supplier
+# value "Marchant" - that is the portal's own spelling, read off the live form,
+# not a typo to be helpfully corrected here. Omitting this field entirely (which
+# this module used to do) fails the login no matter how right the password is.
+LOGIN_TYPE_SUPPLIER = "Marchant"
+LOGIN_TYPE_PROCURING_ENTITY = "Agency"
 DOCUMENTS_PATH = "/Tenders/tender_doc_view"
 
 _CSRF_RE = re.compile(r'name="_csrfToken"[^>]*value="([^"]+)"')
@@ -55,6 +62,16 @@ class LoginError(Exception):
 
     Never carries the password: this string reaches logs, API responses and
     the browser.
+    """
+
+
+class EgpUnreachable(LoginError):
+    """The portal could not be contacted at all.
+
+    Its own type because "we could not reach eGP" and "eGP says that password
+    is wrong" send the owner to two completely different places, and this
+    module used to collapse both into the second. A transient DNS failure was
+    reported to a real user as a rejected credential.
     """
 
 
@@ -114,7 +131,13 @@ class EgpSession:
         self.client.close()
 
 
-def log_in(username: str, password: str, *, client: httpx.Client | None = None) -> EgpSession:
+def log_in(
+    username: str,
+    password: str,
+    *,
+    login_type: str = LOGIN_TYPE_SUPPLIER,
+    client: httpx.Client | None = None,
+) -> EgpSession:
     """Establish an authenticated eGP session.
 
     Raises LoginError on anything other than a confirmed success. In
@@ -130,7 +153,7 @@ def log_in(username: str, password: str, *, client: httpx.Client | None = None) 
             page = http.get(f"{BASE_URL}{LOGIN_PATH}", headers={"User-Agent": USER_AGENT})
             page.raise_for_status()
         except httpx.HTTPError as error:
-            raise LoginError(f"could not reach the eGP login page: {error}") from error
+            raise EgpUnreachable(f"could not reach the eGP login page: {error}") from error
 
         token = parse_csrf_token(page.text)
 
@@ -141,6 +164,7 @@ def log_in(username: str, password: str, *, client: httpx.Client | None = None) 
                     "_method": "POST",
                     "_csrfToken": token,
                     "checkCount": "",
+                    "type": login_type,
                     "username": username,
                     "password": password,
                     "redirect": "",
@@ -153,7 +177,7 @@ def log_in(username: str, password: str, *, client: httpx.Client | None = None) 
         except httpx.HTTPError as error:
             # Deliberately does not interpolate the response body or the form
             # data - the password is in that dict.
-            raise LoginError(f"eGP login request failed: {error}") from error
+            raise EgpUnreachable(f"eGP login request failed: {error}") from error
 
         # A CakePHP login that works redirects away from the form. One that
         # fails re-renders the form with an error, at status 200 - so "did we
@@ -177,17 +201,26 @@ def log_in(username: str, password: str, *, client: httpx.Client | None = None) 
         raise
 
 
-def verify_credentials(username: str, password: str) -> tuple[bool, str]:
+def verify_credentials(
+    username: str, password: str, *, login_type: str = LOGIN_TYPE_SUPPLIER
+) -> tuple[str, str]:
     """Try the credentials once and report the outcome in words fit for the UI.
 
-    Returns (ok, message). Never raises and never echoes the password, because
-    the message is written straight to the database and shown on the page.
+    Returns (status, message) with status one of "verified", "failed" or
+    "unreachable". Never raises and never echoes the password, because the
+    message is written straight to the database and shown on the page.
+
+    The three-way split matters: a wrong password is the owner's to fix, an
+    unreachable portal is not, and telling them the second is the first sends
+    them hunting for a problem they do not have.
     """
     try:
-        session = log_in(username, password)
+        session = log_in(username, password, login_type=login_type)
+    except EgpUnreachable as error:
+        return "unreachable", str(error)[:400]
     except LoginError as error:
-        return False, str(error)[:400]
+        return "failed", str(error)[:400]
     except Exception as error:  # noqa: BLE001 - last-resort guard, see docstring
-        return False, f"unexpected error contacting eGP: {type(error).__name__}"
+        return "unreachable", f"unexpected error contacting eGP: {type(error).__name__}"
     session.close()
-    return True, "eGP accepted these credentials"
+    return "verified", "eGP accepted these credentials"

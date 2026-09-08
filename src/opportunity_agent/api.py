@@ -625,10 +625,13 @@ def verify_credential(
         db.commit()
         raise HTTPException(status_code=503, detail=str(error))
 
-    ok, message = _verify_egp_credentials(credential.username, secret)
-    credential.verification_status = "verified" if ok else "failed"
+    # Three-way, not two: "unreachable" is recorded as its own state so the UI
+    # does not tell the owner their password was rejected when the portal was
+    # simply not contactable.
+    status, message = _verify_egp_credentials(credential.username, secret)
+    credential.verification_status = status
     credential.verification_detail = message
-    credential.last_verified_at = datetime.now(timezone.utc) if ok else None
+    credential.last_verified_at = datetime.now(timezone.utc) if status == "verified" else None
     db.commit()
     return _credential_out(credential)
 

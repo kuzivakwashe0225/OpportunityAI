@@ -401,7 +401,7 @@ def test_verification_is_owner_triggered_and_records_the_outcome(key, monkeypatc
     def fake_verify(username, password):
         seen["username"] = username
         seen["password"] = password
-        return True, "eGP accepted these credentials"
+        return "verified", "eGP accepted these credentials"
 
     monkeypatch.setattr(api, "_verify_egp_credentials", fake_verify)
     body = client.post(f"/profiles/{profile['id']}/credentials/egp/verify").json()
@@ -417,7 +417,7 @@ def test_a_rejected_login_is_recorded_as_failed_not_verified(key, monkeypatch):
     client.put(f"/profiles/{profile['id']}/credentials/egp",
                json={"username": "meshcloud", "password": "wrong"})
     monkeypatch.setattr(api, "_verify_egp_credentials",
-                        lambda u, p: (False, "eGP rejected the credentials"))
+                        lambda u, p: ("failed", "eGP rejected the credentials"))
 
     body = client.post(f"/profiles/{profile['id']}/credentials/egp/verify").json()
 
@@ -430,7 +430,7 @@ def test_changing_the_password_resets_a_previous_verification(key, monkeypatch):
     profile = _tender_profile()
     client.put(f"/profiles/{profile['id']}/credentials/egp",
                json={"username": "meshcloud", "password": "old"})
-    monkeypatch.setattr(api, "_verify_egp_credentials", lambda u, p: (True, "ok"))
+    monkeypatch.setattr(api, "_verify_egp_credentials", lambda u, p: ("verified", "ok"))
     client.post(f"/profiles/{profile['id']}/credentials/egp/verify")
 
     body = client.put(f"/profiles/{profile['id']}/credentials/egp",

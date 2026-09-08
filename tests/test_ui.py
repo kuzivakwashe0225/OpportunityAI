@@ -42,3 +42,19 @@ def test_ui_talks_to_the_per_profile_pipeline_endpoints():
 
 
 
+
+
+def test_onboarding_final_step_is_profile_type_aware():
+    """A company finishing setup must not be told to "upload a CV first".
+
+    Steps 1 and 2 both branch on the profile's subject, but step 3 was static
+    HTML that always pointed at a CV - so a tender profile ended its own
+    onboarding aimed at the wrong paperwork. It now reads /schema like the
+    other steps, which is also what makes it correct for profile types that
+    do not exist yet.
+    """
+    response = client.get("/ui")
+
+    assert "async function renderOnboardStep3" in response.text, "step 3 must fetch the schema"
+    assert "Upload company documents" in response.text, "company path missing"
+    assert "Upload a CV first" in response.text, "person path missing"

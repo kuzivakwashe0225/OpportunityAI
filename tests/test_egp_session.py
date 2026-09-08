@@ -47,6 +47,9 @@ def test_a_successful_login_returns_an_authenticated_session():
         body = request.content.decode()
         assert "_csrfToken=TOKEN-abc123" in body
         assert "username=meshcloud" in body
+        # The role dropdown is required by the real form; omitting it fails
+        # the login however correct the password is.
+        assert "type=Marchant" in body
         return httpx.Response(302, headers={"location": "/Dashboards/index"})
 
     client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
@@ -170,3 +173,44 @@ def test_being_bounced_back_to_the_login_page_is_detected():
 
     with pytest.raises(egp_session.LoginError, match="expired"):
         session.tender_documents("46190")
+
+
+def test_the_login_posts_the_supplier_role_by_default():
+    """eGP's login form has a <select name="type"> the owner must choose from.
+
+    Read off the live form: "Marchant" is Supplier (the portal's own spelling)
+    and "Agency" is Procuring Entity. This module never sent the field at all,
+    which is why real credentials were being reported as rejected.
+    """
+    posted = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, text=LOGIN_PAGE)
+        posted["body"] = request.content.decode()
+        return httpx.Response(302, headers={"location": "/Dashboards/index"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
+    egp_session.log_in("meshcloud", "secret", client=client)
+
+    assert "type=Marchant" in posted["body"]
+    assert egp_session.LOGIN_TYPE_SUPPLIER == "Marchant"
+    assert egp_session.LOGIN_TYPE_PROCURING_ENTITY == "Agency"
+
+
+def test_an_unreachable_portal_is_not_reported_as_a_rejected_password():
+    """A DNS blip once told a real user "eGP did not accept it".
+
+    Those are opposite diagnoses - one is theirs to fix, the other is not - so
+    an unreachable portal gets its own status rather than being folded into a
+    credential failure.
+    """
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("[Errno -3] Temporary failure in name resolution")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
+    with pytest.raises(egp_session.EgpUnreachable):
+        egp_session.log_in("meshcloud", "secret", client=client)
+
+    # EgpUnreachable stays a LoginError, so existing callers still catch it.
+    assert issubclass(egp_session.EgpUnreachable, egp_session.LoginError)

@@ -685,6 +685,11 @@
         "<p class='muted' style='margin:4px 0 0;'>Last confirmed "+
         esc(egp.last_verified_at? new Date(egp.last_verified_at).toLocaleString() : "just now")+
         ".</p></div>";
+    } else if(egp.verification_status==="unreachable"){
+      status = "<div class='advice'><strong>Couldn't reach eGP to test "+esc(egp.username)+".</strong>"+
+        "<p class='muted' style='margin:4px 0 0;'>"+esc(egp.verification_detail||"")+
+        " That's a connection problem between this server and the portal, not a wrong "+
+        "password &mdash; nothing to change here, just try again.</p></div>";
     } else if(egp.verification_status==="failed"){
       status = "<div class='advice blocked'><strong>Saved as "+esc(egp.username)+
         ", but eGP did not accept it.</strong><p class='muted' style='margin:4px 0 0;'>"+
@@ -1069,7 +1074,37 @@
     });
   }
 
-  function renderOnboardStep3(){
+  async function renderOnboardStep3(){
+    // Reads the profile's own schema rather than assuming a person: step 1 and
+    // step 2 both branch on subject, and this step used to contradict them by
+    // telling a company to "upload a CV first". Schema-driven means every
+    // profile type - present and future - gets its own paperwork here without
+    // this function needing to know which types exist.
+    var pid = onboarding.createdId || (activeProfile()||{}).id;
+    var schema=null;
+    if(pid){ try{ schema=await api("/profiles/"+pid+"/schema"); }catch(e){ schema=null; } }
+    var company = !!schema && schema.subject==="organisation";
+    var required = schema ? schema.documents.filter(function(d){return d.required;}) : [];
+    var outstanding = required.filter(function(d){return !d.held;}).length;
+
+    var needsPanel = required.length
+      ? "<section class='panel'><h2>What it needs from you"+
+          (outstanding?" <span class='muted'>("+outstanding+" still missing)</span>":"")+"</h2>"+
+        "<p class='muted'>"+(company
+          ? "Bids are thrown out on paperwork more often than on price. Procuring entities ask "+
+            "for these almost every time:"
+          : "These are the documents applications ask for most often:")+"</p>"+
+        "<div style='margin-top:12px;'>"+required.map(function(d){
+          return "<div class='doc-slot'>"+
+            (d.held ? "<span class='doc-mark held' title='Uploaded'>&#10003;</span>"
+                    : "<span class='doc-mark needed' title='Still needed'>!</span>")+
+            "<span class='doc-name'><strong>"+esc(d.label)+"</strong>"+
+            "<span>"+esc(d.hint||"")+"</span></span></div>";
+        }).join("")+"</div></section>"
+      : "";
+
+    var uploadLabel = company ? "Upload company documents" : "Upload a CV first";
+
     $("#view-root").innerHTML =
       "<h1 class='view-title'>You're set up</h1>"+
       "<p class='view-sub'>From here the agent works on its own.</p>"+
@@ -1082,7 +1117,8 @@
       "anything on your behalf — you send it yourself from the portal, with everything already written.</p>"+
       "<div class='row' style='margin-top:18px;'>"+
       "<button class='btn' id='ob-finish' type='button'>Go to dashboard</button>"+
-      "<a class='btn plain' href='#/profile'>Upload a CV first</a></div></section>";
+      "<a class='btn plain' href='#/profile'>"+esc(uploadLabel)+"</a></div></section>"+
+      needsPanel;
     $("#ob-finish").addEventListener("click",function(){ onboarding.step=1; location.hash="#/dashboard"; });
   }
 
