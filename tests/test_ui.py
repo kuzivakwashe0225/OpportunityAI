@@ -58,3 +58,14 @@ def test_onboarding_final_step_is_profile_type_aware():
     assert "async function renderOnboardStep3" in response.text, "step 3 must fetch the schema"
     assert "Upload company documents" in response.text, "company path missing"
     assert "Upload a CV first" in response.text, "person path missing"
+
+
+def test_an_awarded_elsewhere_tender_shows_no_action_buttons():
+    """A tender awarded to someone else must not still offer Approve, Submit
+    or Apply anyway - there is nothing left for the owner to decide on it,
+    whatever workflow stage it happened to be sitting at.
+    """
+    response = client.get("/ui")
+
+    assert "if(o.awarded_to){" in response.text
+    assert "Awarded to " in response.text

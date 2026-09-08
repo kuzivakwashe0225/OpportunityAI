@@ -1,6 +1,6 @@
 import os
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import jwt
@@ -735,6 +735,11 @@ class OpportunityOut(BaseModel):
     escalated: bool
     package: dict | None
     compliance: dict | None
+    # Set once this tender's id turns up in the eGP award notices while the
+    # owner had not submitted or dismissed it - see pipeline.py's
+    # _mark_awarded_elsewhere. None for every non-tender opportunity.
+    awarded_to: str | None
+    awarded_at: date | None
     created_at: datetime
 
     model_config = {"from_attributes": True}

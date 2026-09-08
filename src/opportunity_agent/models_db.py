@@ -13,9 +13,9 @@ later migration if that changes, not a decision to relitigate now.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import JSON, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, Date, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -184,10 +184,40 @@ class StoredOpportunity(Base):
     escalated: Mapped[bool] = mapped_column(default=False)
     package: Mapped[dict | None] = mapped_column(JSON, default=None)
     usefulness: Mapped[str | None] = mapped_column(String(20), default=None)
+    # Set once this tender's id turns up in the eGP award notices (egp_awards.py)
+    # while the opportunity has not been submitted or dismissed - it was
+    # decided while the owner was still working on it, or before they got to
+    # it. Own pair of columns rather than a `stage` value: being awarded
+    # elsewhere is a fact about the *tender*, not a place in the owner's own
+    # workflow, and it can arrive at any stage from "discovered" to "approved".
+    awarded_to: Mapped[str | None] = mapped_column(String(500), default=None)
+    awarded_at: Mapped[date | None] = mapped_column(Date, default=None)
     created_at: Mapped[datetime] = mapped_column(default=_now)
     updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
 
     profile: Mapped["Profile"] = relationship(back_populates="opportunities")
+
+
+class StoredAwardNotice(Base):
+    """One eGP award notice (egp_awards.py), kept past the live page's own
+    rolling ~100-row window.
+
+    Global, not scoped to a profile or account: an award notice is a public
+    regulator record, the same fact regardless of who is looking at it - like
+    the live tender board itself, which is likewise not duplicated per
+    profile. `award_number` is PRAZ's own identifier and is already unique, so
+    it is the primary key rather than a generated uuid; that also makes
+    "have we recorded this one" a plain key lookup when polling the page again.
+    """
+
+    __tablename__ = "award_notices"
+
+    award_number: Mapped[str] = mapped_column(String(20), primary_key=True)
+    tender_id: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(1000), default="")
+    awardee: Mapped[str] = mapped_column(String(500), default="")
+    award_date: Mapped[date | None] = mapped_column(Date, default=None)
+    first_seen_at: Mapped[datetime] = mapped_column(default=_now)
 
 
 class ProfileDiscoveryRun(Base):

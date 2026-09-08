@@ -1,7 +1,9 @@
+from datetime import date
+
 import pytest
 from sqlalchemy.orm import Session
 
-from opportunity_agent import models_db, pipeline
+from opportunity_agent import egp_awards, models_db, pipeline
 from opportunity_agent.connector import PublicPage
 from opportunity_agent.db import init_db, make_engine
 from opportunity_agent.search import SearchResult
@@ -357,6 +359,7 @@ def test_a_tender_profile_reads_the_board_and_never_calls_web_search(session, co
     run = pipeline.run_profile_cycle(
         session, company_profile, api_key="k",
         search_fn=spy_search, tender_fn=lambda: [(tender, details)],
+        award_fn=lambda: [],  # no test may reach the live award notices page either
     )
 
     assert searched == [], "tenders must not go through the search API"
@@ -382,6 +385,7 @@ def test_a_tender_draft_carries_the_advice_the_bidder_needs(session, company_pro
     pipeline.run_profile_cycle(
         session, company_profile, api_key="k",
         search_fn=lambda p, api_key, **kw: [], tender_fn=lambda: [(tender, details)],
+        award_fn=lambda: [],
     )
 
     stored = session.query(models_db.StoredOpportunity).one()
@@ -390,3 +394,152 @@ def test_a_tender_draft_carries_the_advice_the_bidder_needs(session, company_pro
     assert "addend" in advice.lower()
     assert "Tax Clearance" in advice
     assert stored.compliance["ready_to_submit"] is False
+
+
+# ---------------------------------------------------------------------------
+# Award notices: filtering new candidates, flagging existing ones, and
+# accumulating history past the live page's own rolling window.
+# ---------------------------------------------------------------------------
+
+def _awarded(tender_id: str, awardee: str = "Some Other Company") -> egp_awards.AwardNotice:
+    return egp_awards.AwardNotice(
+        award_number="9001", tender_id=tender_id, title="Something",
+        awardee=awardee, award_date=date(2026, 9, 1),
+    )
+
+
+def test_a_newly_found_tender_already_awarded_is_not_stored(session, company_profile):
+    from opportunity_agent.models import Opportunity
+
+    tender = Opportunity(
+        source="PRAZ eGP", title="Supply of transformers",
+        url="https://egp.praz.org.zw/Indexes/viewLiveTenderDetails/1",
+        eligible_countries=["Zimbabwe"], required_categories=["GE001"],
+        required_documents=[], evidence=["PRAZ eGP bulletin board listing"],
+        requirements_verified=True,
+    )
+
+    run = pipeline.run_profile_cycle(
+        session, company_profile, api_key="k",
+        search_fn=lambda p, api_key, **kw: [], tender_fn=lambda: [(tender, None)],
+        award_fn=lambda: [_awarded("1")],
+    )
+
+    assert session.query(models_db.StoredOpportunity).count() == 0
+    # the board still reported one tender - the exclusion is deliberate, not a failure
+    assert run.found == 1
+    assert run.added == 0
+
+
+def test_an_already_stored_tender_that_gets_awarded_is_flagged_not_deleted(session, company_profile):
+    from opportunity_agent.models import Opportunity
+
+    tender = Opportunity(
+        source="PRAZ eGP", title="Supply of transformers",
+        url="https://egp.praz.org.zw/Indexes/viewLiveTenderDetails/1",
+        eligible_countries=["Zimbabwe"], required_categories=["GE001"],
+        required_documents=[], evidence=["PRAZ eGP bulletin board listing"],
+        requirements_verified=True,
+    )
+    # cycle 1: discovered while still open
+    pipeline.run_profile_cycle(
+        session, company_profile, api_key="k",
+        search_fn=lambda p, api_key, **kw: [], tender_fn=lambda: [(tender, None)],
+        award_fn=lambda: [],
+    )
+    stored = session.query(models_db.StoredOpportunity).one()
+    assert stored.awarded_to is None
+    assert stored.stage == "drafted"
+
+    # cycle 2: someone else has now won it - board no longer lists it, so the
+    # only way the owner finds out is this flag on the row they already have
+    pipeline.run_profile_cycle(
+        session, company_profile, api_key="k",
+        search_fn=lambda p, api_key, **kw: [], tender_fn=lambda: [],
+        award_fn=lambda: [_awarded("1", awardee="Acme Rivals Ltd")],
+    )
+
+    session.refresh(stored)
+    assert stored.awarded_to == "Acme Rivals Ltd"
+    assert stored.awarded_at == date(2026, 9, 1)
+    assert stored.stage == "drafted", "the workflow stage itself is untouched"
+
+
+def test_a_submitted_tender_is_not_touched_even_if_later_awarded_elsewhere(session, company_profile):
+    """The owner already knows the outcome of a bid they submitted - this is
+    for tenders sitting in the queue looking actionable when they no longer
+    are, not for rewriting history on one that's already gone in."""
+    from opportunity_agent.models import Opportunity
+
+    tender = Opportunity(
+        source="PRAZ eGP", title="Supply of transformers",
+        url="https://egp.praz.org.zw/Indexes/viewLiveTenderDetails/1",
+        eligible_countries=["Zimbabwe"], required_categories=["GE001"],
+        required_documents=[], evidence=["PRAZ eGP bulletin board listing"],
+        requirements_verified=True,
+    )
+    pipeline.run_profile_cycle(
+        session, company_profile, api_key="k",
+        search_fn=lambda p, api_key, **kw: [], tender_fn=lambda: [(tender, None)],
+        award_fn=lambda: [],
+    )
+    stored = session.query(models_db.StoredOpportunity).one()
+    stored.stage = "submitted"
+    session.commit()
+
+    pipeline.run_profile_cycle(
+        session, company_profile, api_key="k",
+        search_fn=lambda p, api_key, **kw: [], tender_fn=lambda: [],
+        award_fn=lambda: [_awarded("1")],
+    )
+
+    session.refresh(stored)
+    assert stored.awarded_to is None
+
+
+def test_award_notices_are_persisted_past_the_rolling_window(session, company_profile):
+    notice = _awarded("1")
+    pipeline.run_profile_cycle(
+        session, company_profile, api_key="k",
+        search_fn=lambda p, api_key, **kw: [], tender_fn=lambda: [],
+        award_fn=lambda: [notice],
+    )
+
+    row = session.query(models_db.StoredAwardNotice).one()
+    assert row.award_number == "9001"
+    assert row.tender_id == "1"
+    assert row.awardee == "Some Other Company"
+
+    # a later cycle re-polling the same window must not duplicate the row
+    pipeline.run_profile_cycle(
+        session, company_profile, api_key="k",
+        search_fn=lambda p, api_key, **kw: [], tender_fn=lambda: [],
+        award_fn=lambda: [notice],
+    )
+    assert session.query(models_db.StoredAwardNotice).count() == 1
+
+
+def test_a_failed_award_poll_does_not_fail_the_cycle(session, company_profile):
+    from opportunity_agent.models import Opportunity
+
+    tender = Opportunity(
+        source="PRAZ eGP", title="Supply of transformers",
+        url="https://egp.praz.org.zw/Indexes/viewLiveTenderDetails/1",
+        eligible_countries=["Zimbabwe"], required_categories=["GE001"],
+        required_documents=[], evidence=["PRAZ eGP bulletin board listing"],
+        requirements_verified=True,
+    )
+
+    def broken_award_fn():
+        raise RuntimeError("PRAZ is down")
+
+    run = pipeline.run_profile_cycle(
+        session, company_profile, api_key="k",
+        search_fn=lambda p, api_key, **kw: [], tender_fn=lambda: [(tender, None)],
+        award_fn=broken_award_fn,
+    )
+
+    # degrades to "nothing filtered or flagged" - not a failed cycle
+    assert run.found == 1
+    assert run.added == 1
+    assert session.query(models_db.StoredOpportunity).one().awarded_to is None

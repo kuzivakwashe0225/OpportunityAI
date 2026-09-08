@@ -20,6 +20,14 @@ Two sources, chosen by profile type. Scholarships, jobs and grants are found by
 web search, because there is no register of them. Tenders are read straight off
 the PRAZ eGP bulletin board (egp.py) - structured records from the procurement
 regulator, which beats searching the open web for them by a wide margin.
+
+For tenders specifically, every cycle also polls the award notices
+(egp_awards.py) and does two things with them before drafting anything: newly
+found tenders already awarded to someone else are dropped rather than stored,
+and previously stored ones the owner has not submitted or dismissed are
+flagged (StoredOpportunity.awarded_to/awarded_at) rather than left to sit in
+the review queue looking actionable. Both are best-effort - a failed poll
+degrades to "nothing filtered or flagged this cycle", not a failed cycle.
 """
 
 from __future__ import annotations
@@ -29,7 +37,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from . import compliance, egp, models_db, profile_schema
+from . import compliance, egp, egp_awards, models_db, profile_schema
 from .connector import fetch_public_page
 from .discovery import build_search_queries, canonicalize_url, discover
 from .drafting import build_application_package
@@ -144,6 +152,69 @@ def _tender_opportunities(fetch_details: bool = True) -> list[tuple[Opportunity,
     return found
 
 
+def _persist_new_award_notices(session: Session, notices: list[egp_awards.AwardNotice]) -> None:
+    """Accumulate award history past the live page's own rolling window.
+
+    Insert-only, keyed on `award_number`: a later cycle re-polling the same
+    ~100-row window must not duplicate rows it already recorded. This is
+    global reference data, not scoped to the profile doing the polling - see
+    StoredAwardNotice's docstring.
+    """
+    if not notices:
+        return
+    existing = {
+        row.award_number
+        for row in session.query(models_db.StoredAwardNotice)
+        .filter(models_db.StoredAwardNotice.award_number.in_([n.award_number for n in notices]))
+        .all()
+    }
+    for notice in notices:
+        if notice.award_number in existing:
+            continue
+        session.add(models_db.StoredAwardNotice(
+            award_number=notice.award_number,
+            tender_id=notice.tender_id,
+            title=notice.title,
+            awardee=notice.awardee,
+            award_date=notice.award_date,
+        ))
+
+
+def _mark_awarded_elsewhere(
+    session: Session, profile: models_db.Profile, notices: list[egp_awards.AwardNotice]
+) -> int:
+    """Stored tender opportunities the owner has not acted on, but which have
+    since been awarded to someone else, stop being actionable.
+
+    Submitted and dismissed rows are left alone - the owner already knows the
+    outcome of one and chose to ignore the other. Everything else (discovered,
+    needs_documents, drafted, even approved) can still be sitting in the
+    review queue asking the owner to act on a bid that is already decided,
+    which is exactly what this is for.
+    """
+    awarded = egp_awards.awarded_tender_ids(notices)
+    if not awarded:
+        return 0
+    by_tender_id = {n.tender_id: n for n in notices}
+    rows = (
+        session.query(models_db.StoredOpportunity)
+        .filter_by(profile_id=profile.id)
+        .filter(models_db.StoredOpportunity.awarded_to.is_(None))
+        .filter(~models_db.StoredOpportunity.stage.in_(("submitted", "dismissed")))
+        .all()
+    )
+    marked = 0
+    for row in rows:
+        tender_id = egp.tender_id_from_url(row.canonical_url)
+        notice = by_tender_id.get(tender_id) if tender_id else None
+        if notice is None:
+            continue
+        row.awarded_to = notice.awardee
+        row.awarded_at = notice.award_date
+        marked += 1
+    return marked
+
+
 def run_profile_cycle(
     session: Session,
     profile: models_db.Profile,
@@ -152,6 +223,7 @@ def run_profile_cycle(
     search_fn: Callable[..., list[SearchResult]] = discover,
     fetch_fn: Callable[[str], object] = fetch_public_page,
     tender_fn: Callable[..., list] = _tender_opportunities,
+    award_fn: Callable[[], list[egp_awards.AwardNotice]] = egp_awards.fetch_award_notices,
 ) -> models_db.ProfileDiscoveryRun | None:
     """One unattended pass for one profile. Returns the run record, or None if
     the profile isn't set up enough to act on yet."""
@@ -163,6 +235,21 @@ def run_profile_cycle(
     queries = build_search_queries(subject, profile.profile_type)
     failures: list[str] = []
     is_tender = profile.profile_type == "tender"
+
+    # ---- award notices ------------------------------------------------------
+    # Best-effort and deliberately not fatal to the cycle: award filtering is
+    # an enhancement on top of tender discovery, not a dependency of it. A
+    # failed fetch here means "nothing gets filtered or flagged this cycle",
+    # which is the same safe default egp_awards.still_open() already commits
+    # to when it has no notices to work with.
+    notices: list[egp_awards.AwardNotice] = []
+    if is_tender:
+        try:
+            notices = award_fn()
+        except Exception:
+            notices = []
+        _persist_new_award_notices(session, notices)
+        _mark_awarded_elsewhere(session, profile, notices)
 
     # ---- gather -----------------------------------------------------------
     # `found` counts what the source turned up, not what we managed to fetch -
@@ -177,6 +264,16 @@ def run_profile_cycle(
             return _record_run(session, profile, started_at, queries,
                                found=0, added=0, drafted=0, failures=[f"eGP board: {error}"])
         found = len(candidates)
+        if notices:
+            # A tender already awarded is not a new opportunity to store or
+            # draft against, however it still reads on the live board - only
+            # `found` reflects the board's own count; what goes on to be
+            # stored is the filtered list.
+            awarded = egp_awards.awarded_tender_ids(notices)
+            candidates = [
+                (opportunity, details) for opportunity, details in candidates
+                if egp.tender_id_from_url(str(opportunity.url)) not in awarded
+            ]
     else:
         try:
             results = search_fn(subject, api_key=api_key, profile_type=profile.profile_type)

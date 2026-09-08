@@ -533,7 +533,12 @@
                  : (o.match_reasons.failed||[]).concat(o.match_reasons.unknown||[]);
     var deadline = opp.deadline || "Not specified";
     var actions = [];
-    if(o.stage==="needs_documents"){
+    // Awarded to someone else overrides every other action: there is nothing
+    // left for the owner to approve, submit or dismiss on a bid that has
+    // already been decided, whatever stage it was sitting at.
+    if(o.awarded_to){
+      // no actions
+    } else if(o.stage==="needs_documents"){
       actions.push("<a class='btn small' href='#/profile'>Upload what's missing</a>");
       actions.push(btn("dismiss","Not interested","btn small danger"));
     } else if(o.stage==="drafted"){
@@ -556,9 +561,15 @@
         " · score "+o.match_score+
         (o.stage!=="discovered"?" <span class='pill stage'>"+esc(o.stage)+"</span>":"")+
         (o.escalated?" <span class='pill stage'>pushed through by you</span>":"")+"</p>"+
+      (o.awarded_to
+        ? "<div class='advice blocked'><strong>Awarded to "+esc(o.awarded_to)+
+          (o.awarded_at?" on "+esc(o.awarded_at):"")+".</strong>"+
+          "<p class='muted' style='margin:4px 0 0;'>PRAZ's award notice board shows this tender "+
+          "decided. It's kept here for the record, but there's nothing left to do on it.</p></div>"
+        : "")+
       (reasons.length? "<p class='reasons'><strong>"+(o.match_status==="eligible"?"Matches":"Blockers")+
         ":</strong> "+esc(reasons.join("; "))+"</p>" : "")+
-      complianceAdvice(o.compliance)+
+      (o.awarded_to ? "" : complianceAdvice(o.compliance))+
       "<div class='opp-actions'>"+actions.join("")+"</div>"+
       "<div class='package'>"+(o.package?renderPackage(o.package):"")+"</div></article>";
   }

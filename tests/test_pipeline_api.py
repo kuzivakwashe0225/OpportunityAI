@@ -464,3 +464,51 @@ def test_another_account_cannot_touch_stored_credentials(key):
 
     assert client.get(f"/profiles/{profile['id']}/credentials").status_code == 401
     assert client.delete(f"/profiles/{profile['id']}/credentials/egp").status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Award notices reach the owner through the same opportunity the agent
+# already showed them - see pipeline.py's _mark_awarded_elsewhere.
+# ---------------------------------------------------------------------------
+
+def test_an_opportunity_awarded_elsewhere_reports_it_over_the_api():
+    from datetime import date
+
+    profile = _tender_profile()
+    with db_module.SessionLocal() as session:
+        stored = models_db.StoredOpportunity(
+            profile_id=profile["id"],
+            canonical_url="https://egp.praz.org.zw/Indexes/viewLiveTenderDetails/1",
+            payload={"source": "PRAZ eGP", "title": "Supply of transformers",
+                     "url": "https://egp.praz.org.zw/Indexes/viewLiveTenderDetails/1"},
+            match_status="eligible", match_score=90, stage="drafted",
+            awarded_to="Acme Rivals Ltd", awarded_at=date(2026, 9, 1),
+        )
+        session.add(stored)
+        session.commit()
+        opp_id = stored.id
+
+    body = client.get(f"/profiles/{profile['id']}/opportunities/{opp_id}").json()
+
+    assert body["awarded_to"] == "Acme Rivals Ltd"
+    assert body["awarded_at"] == "2026-09-01"
+
+
+def test_an_opportunity_never_awarded_reports_null():
+    profile = _tender_profile()
+    with db_module.SessionLocal() as session:
+        stored = models_db.StoredOpportunity(
+            profile_id=profile["id"],
+            canonical_url="https://egp.praz.org.zw/Indexes/viewLiveTenderDetails/2",
+            payload={"source": "PRAZ eGP", "title": "Supply of desks",
+                     "url": "https://egp.praz.org.zw/Indexes/viewLiveTenderDetails/2"},
+            match_status="eligible", match_score=90, stage="drafted",
+        )
+        session.add(stored)
+        session.commit()
+        opp_id = stored.id
+
+    body = client.get(f"/profiles/{profile['id']}/opportunities/{opp_id}").json()
+
+    assert body["awarded_to"] is None
+    assert body["awarded_at"] is None

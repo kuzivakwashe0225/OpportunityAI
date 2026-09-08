@@ -245,6 +245,18 @@ def _parse_date(raw: str) -> date | None:
         return None
 
 
+def tender_id_from_url(url: str) -> str | None:
+    """The tender id embedded in a live-tender detail URL, or None.
+
+    A StoredOpportunity only carries a URL, not the tender id it came from -
+    this is what lets pipeline.py join it back to board data (via
+    parse_bulletin_board) or award data (via egp_awards.py), both of which are
+    keyed on the id, not the URL.
+    """
+    match = _DETAIL_RE.search(url)
+    return match.group(1) if match else None
+
+
 def parse_table_rows(html: str) -> list[list[str]]:
     """Every non-header row of the page's tables, as lists of cell text.
 
