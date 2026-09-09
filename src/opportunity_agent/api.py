@@ -83,6 +83,14 @@ class AccountOut(BaseModel):
     # Lets the frontend send a first-time user straight to "choose a password"
     # instead of leaving them on one that arrived in an email in clear.
     must_change_password: bool = False
+    # Shown on the account screen. There is deliberately no password field of
+    # any kind here: passwords are bcrypt hashes (auth.py), so the system
+    # cannot display one, and a system that could display yours could display
+    # everyone's. "When did I last change it" is the honest answer to "let me
+    # see my password", and it is the one that actually helps.
+    password_set_at: datetime | None = None
+    temp_password_expires_at: datetime | None = None
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -221,6 +229,74 @@ def _welcome_email(email: str, password: str) -> str:
         "If you did not ask for this account, you can ignore this email.",
     ]
     return "\n".join(lines) + "\n"
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+def _reset_email(email: str, password: str) -> str:
+    lines = [
+        "A password reset was requested for your OpportunityAI account.",
+        "",
+        "Sign in with:",
+        "",
+        f"Email: {email}",
+        f"Password: {password}",
+        "",
+        APP_URL,
+        "",
+        f"This password expires in {TEMP_PASSWORD_TTL.days} days, and you will be asked",
+        "to replace it as soon as you sign in.",
+        "",
+        "If you did not ask for this, someone else typed your address into the",
+        "reset form. Your previous password still worked until this email was",
+        "sent - if that was not you, sign in and change it now.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+@app.post("/forgot-password")
+def forgot_password(
+    payload: ForgotPasswordRequest, db: Session = Depends(get_db_session)
+) -> dict[str, str]:
+    """Email a fresh temporary password to an account that has lost its own.
+
+    Order matters and is the same discipline as registration: the mail is sent
+    *before* the new hash is stored. Overwriting the password first and then
+    failing to deliver would lock the owner out of their own account using a
+    password that exists nowhere - strictly worse than the state they were
+    already in.
+
+    This reports whether the address is registered, which is a leak. It is the
+    same trade `register` already documents and makes deliberately: /register
+    answers the same question to anyone who asks, so refusing to answer it
+    here would be theatre, while "I never got the email" would become
+    unanswerable for a real user.
+    """
+    email = payload.email.strip().lower()
+    account = db.query(models_db.Account).filter_by(email=email).first()
+    if account is None:
+        raise HTTPException(status_code=404, detail="no account with this email address")
+
+    temporary = generate_temporary_password()
+    new_hash = auth_module.hash_password(temporary)
+
+    try:
+        _send_mail(
+            to=email,
+            subject="Your OpportunityAI password reset",
+            body=_reset_email(email, temporary),
+        )
+    except mailer.MailError as error:
+        db.rollback()
+        raise HTTPException(status_code=503, detail=str(error))
+
+    account.password_hash = new_hash
+    account.must_change_password = True
+    account.temp_password_expires_at = datetime.now(timezone.utc) + TEMP_PASSWORD_TTL
+    db.commit()
+    return {"status": "sent", "email": email}
 
 
 @app.post("/login", response_model=AccountOut)
@@ -396,6 +472,57 @@ def update_profile(
         profile.hidden_fields = payload.hidden_fields
     db.commit()
     return profile
+
+
+@app.delete("/profiles/{profile_id}", status_code=204)
+def delete_profile(
+    profile_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> None:
+    """Delete a profile and everything that belongs to it.
+
+    Two things the ORM cascade does not cover, both of which would otherwise
+    leave real mess behind:
+
+    * **The uploaded files.** Documents live in MinIO, not in Postgres, so
+      deleting the rows would leave the owner's CV and tax clearance sitting
+      in the bucket after they asked for them to be gone.
+    * **Notifications.** They hang off the *account*, not the profile, but
+      carry nullable `profile_id`/`opportunity_id` foreign keys. Deleting the
+      profile without clearing them violates those constraints.
+
+    An object that has already gone from the bucket is not an error - the row
+    is what the owner asked to be rid of, and refusing to delete it because
+    its file was already missing would leave them stuck.
+    """
+    profile = _get_owned_profile(profile_id, account, db)
+
+    documents = db.query(models_db.Document).filter_by(profile_id=profile.id).all()
+    if documents:
+        client = _minio_client()
+        for document in documents:
+            try:
+                documents_module.delete_document(
+                    client, document.object_key, bucket=DOCUMENTS_BUCKET
+                )
+            except Exception:  # noqa: BLE001 - see docstring
+                pass
+
+    opportunity_ids = [
+        row[0]
+        for row in db.query(models_db.StoredOpportunity.id).filter_by(profile_id=profile.id).all()
+    ]
+    db.query(models_db.Notification).filter(
+        models_db.Notification.profile_id == profile.id
+    ).delete(synchronize_session=False)
+    if opportunity_ids:
+        db.query(models_db.Notification).filter(
+            models_db.Notification.opportunity_id.in_(opportunity_ids)
+        ).delete(synchronize_session=False)
+
+    db.delete(profile)
+    db.commit()
 
 
 @app.post("/profiles/{profile_id}/documents", response_model=DocumentOut, status_code=201)

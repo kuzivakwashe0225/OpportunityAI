@@ -69,3 +69,26 @@ def test_an_awarded_elsewhere_tender_shows_no_action_buttons():
 
     assert "if(o.awarded_to){" in response.text
     assert "Awarded to " in response.text
+
+
+def test_ui_offers_password_recovery_without_ever_showing_a_password():
+    """Someone locked out needs a way back in that is not "ask an admin".
+
+    The account screen deliberately has no reveal-password control, and could
+    not have one - auth.py stores bcrypt hashes.
+    """
+    response = client.get("/ui")
+
+    assert "#/account" in response.text
+    assert "Forgot your password?" in response.text
+    assert "/forgot-password" in response.text
+    assert "one-way hash" in response.text
+
+
+def test_ui_can_delete_a_profile_and_says_what_that_destroys():
+    response = client.get("/ui")
+
+    assert "data-delprofile" in response.text
+    # the confirmation names the consequences rather than just "are you sure?"
+    assert "Delete the profile" in response.text
+    assert "cannot be undone" in response.text

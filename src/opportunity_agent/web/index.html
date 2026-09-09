@@ -188,7 +188,31 @@
         <button class="btn" type="submit">Log in</button>
         <span class="status" id="login-status"></span>
       </div>
+      <p class="muted" style="margin:12px 0 0;font-size:.84rem;">
+        <button class="link-btn" id="show-forgot-btn" type="button">Forgot your password?</button>
+      </p>
     </form>
+    <form id="forgot-form" hidden>
+      <label for="forgot-email">Email</label>
+      <input id="forgot-email" type="text" autocomplete="username">
+      <p class="muted" style="margin:8px 0 0;font-size:.84rem;">
+        We'll email you a new password. Your current one keeps working until
+        that email is actually sent.
+      </p>
+      <div class="row" style="margin-top:16px;">
+        <button class="btn" type="submit">Email me a new password</button>
+        <span class="status" id="forgot-status"></span>
+      </div>
+    </form>
+    <div id="forgot-sent" hidden>
+      <div class="advice"><strong>Check your email.</strong>
+        <p class="muted" style="margin:6px 0 0;">We've sent a new password to
+          <span id="forgot-sent-email"></span>. Sign in with it and you'll be
+          asked to choose your own.</p></div>
+      <div class="row" style="margin-top:16px;">
+        <button class="btn" id="forgot-sent-login" type="button">Go to sign in</button>
+      </div>
+    </div>
     <form id="register-form" hidden>
       <label for="register-email">Email</label>
       <input id="register-email" type="text" autocomplete="username">
@@ -261,6 +285,7 @@
     <a href="#/opportunities" data-route="opportunities">All opportunities</a>
     <a href="#/profile" data-route="profile">Profile &amp; documents</a>
     <a href="#/notifications" data-route="notifications">Notifications</a>
+    <a href="#/account" data-route="account">Account</a>
   </nav>
 
   <main>
@@ -383,7 +408,8 @@
 
   // ---------------- routing ----------------
   var ROUTES = {dashboard:renderDashboard, review:renderReview, opportunities:renderOpportunities,
-                profile:renderProfile, notifications:renderNotifications, onboarding:renderOnboarding};
+                profile:renderProfile, notifications:renderNotifications, onboarding:renderOnboarding,
+                account:renderAccount};
 
   function currentRoute(){
     var r=(location.hash||"").replace(/^#\//,"");
@@ -987,6 +1013,119 @@
     });
   }
 
+  // ---------------- account ----------------
+  function whenText(iso){
+    if(!iso) return null;
+    try{ return new Date(iso).toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"}); }
+    catch(e){ return null; }
+  }
+
+  async function renderAccount(){
+    var me = await api("/me");
+    var profiles = state.profiles || [];
+
+    // Password state is described, never shown, and there is deliberately no
+    // "reveal" control: the server keeps a bcrypt hash, so the plaintext does
+    // not exist anywhere to be revealed. "When did you last change it" is the
+    // honest answer to "show me my password", and the useful one.
+    var pwLine;
+    if(me.must_change_password){
+      var expires = whenText(me.temp_password_expires_at);
+      pwLine = "<div class='advice blocked'><strong>You are still using the password we emailed you.</strong>"+
+        "<p class='muted' style='margin:4px 0 0;'>It arrived in clear text, so replace it below."+
+        (expires ? " It stops working on "+esc(expires)+"." : "")+"</p></div>";
+    } else {
+      var set = whenText(me.password_set_at);
+      pwLine = "<div class='advice'><strong>You chose your own password"+
+        (set ? " on "+esc(set) : "")+".</strong></div>";
+    }
+
+    $("#view-root").innerHTML =
+      "<h1 class='view-title'>Account</h1>"+
+      "<p class='view-sub'>Your sign-in details, and the profiles attached to them.</p>"+
+
+      "<section class='panel'><h2>Signed in as</h2>"+
+      "<div class='doc-slot'><span class='doc-name'><strong>"+esc(me.email)+"</strong>"+
+      "<span>The address you log in with, and where password emails are sent.</span>"+
+      "</span></div>"+
+      "<div style='margin-top:14px;'>"+pwLine+"</div>"+
+      "<p class='muted' style='margin-top:12px;font-size:.82rem;'>We cannot show you your "+
+      "password. It is stored as a one-way hash, so nobody here can read it &mdash; including us. "+
+      "If you have lost it, log out and use &ldquo;Forgot your password?&rdquo; to have a new one emailed.</p>"+
+      "</section>"+
+
+      "<section class='panel'><h2>Change password</h2>"+
+      "<form id='acct-pw-form'>"+
+      "<label for='acct-current'>Current password</label>"+
+      "<input id='acct-current' type='password' autocomplete='current-password'>"+
+      "<label for='acct-new'>New password</label>"+
+      "<input id='acct-new' type='password' autocomplete='new-password'>"+
+      "<label for='acct-confirm'>Confirm it</label>"+
+      "<input id='acct-confirm' type='password' autocomplete='new-password'>"+
+      "<div class='row' style='margin-top:16px;'>"+
+      "<button class='btn' type='submit'>Save password</button>"+
+      "<span class='status' id='acct-pw-status'></span></div></form></section>"+
+
+      "<section class='panel'><h2>Your profiles</h2>"+
+      (profiles.length
+        ? "<div>"+profiles.map(function(pr){
+            return "<div class='doc-slot'><span class='doc-name'>"+
+              "<strong>"+esc(pr.display_name)+"</strong>"+
+              "<span>"+esc(typeName(pr.profile_type))+"</span></span>"+
+              "<a class='btn small plain' href='#/profile' data-pick='"+esc(pr.id)+"'>Edit</a>"+
+              "<button class='btn small danger' data-delprofile='"+esc(pr.id)+"' "+
+                "data-delname='"+esc(pr.display_name)+"'>Delete</button></div>";
+          }).join("")+"</div>"
+        : "<p class='empty'>No profiles yet.</p>")+
+      "<p class='muted' style='margin-top:12px;font-size:.82rem;'>Deleting a profile removes its "+
+      "documents, its saved portal login and everything the agent has found for it. That cannot be undone.</p>"+
+      "</section>";
+
+    $("#acct-pw-form").addEventListener("submit",async function(e){
+      e.preventDefault();
+      var st=$("#acct-pw-status");
+      if($("#acct-new").value !== $("#acct-confirm").value){
+        st.textContent="Those two do not match."; st.className="status err"; return;
+      }
+      st.textContent="Saving..."; st.className="status";
+      try{
+        await api("/change-password",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({current_password:$("#acct-current").value,
+                               new_password:$("#acct-new").value})});
+        renderRoute();
+      }catch(err){ st.textContent=err.message; st.className="status err"; }
+    });
+
+    $all("[data-pick]").forEach(function(a){
+      a.addEventListener("click",function(){
+        state.activeProfileId=a.dataset.pick;
+        try{ localStorage.setItem("activeProfileId",a.dataset.pick); }catch(e){}
+        renderSwitcher();
+      });
+    });
+
+    $all("[data-delprofile]").forEach(function(b){
+      b.addEventListener("click",async function(){
+        // Names the profile and lists what goes with it. A bare "are you
+        // sure?" is the kind of prompt people click straight through.
+        if(!confirm("Delete the profile \""+b.dataset.delname+"\"?\n\n"+
+                    "This removes its uploaded documents, its saved portal login, and every "+
+                    "opportunity the agent has found for it. It cannot be undone.")) return;
+        b.disabled=true; b.textContent="Deleting...";
+        try{
+          await api("/profiles/"+b.dataset.delprofile,{method:"DELETE"});
+          if(state.activeProfileId===b.dataset.delprofile){
+            state.activeProfileId=null;
+            try{ localStorage.removeItem("activeProfileId"); }catch(e){}
+          }
+          await loadProfiles(); renderSwitcher();
+          if(!state.profiles.length){ location.hash="#/onboarding"; return; }
+          renderRoute();
+        }catch(err){ showError(err.message); b.disabled=false; b.textContent="Delete"; }
+      });
+    });
+  }
+
   // ---------------- onboarding ----------------
   var onboarding={step:1, chosen:[], createdId:null};
 
@@ -1170,14 +1309,17 @@
   // function rather than four pairs of hidden flags getting out of step.
   function showAuthPanel(which){
     var panels={login:"#login-form",register:"#register-form",
-                sent:"#register-sent",setpw:"#setpw-form"};
+                sent:"#register-sent",setpw:"#setpw-form",
+                forgot:"#forgot-form",forgotsent:"#forgot-sent"};
     Object.keys(panels).forEach(function(k){ $(panels[k]).hidden = (k!==which); });
     $("#auth-toggle-row").hidden  = which!=="login";
-    $("#auth-toggle-back").hidden = which!=="register";
+    $("#auth-toggle-back").hidden = which!=="register" && which!=="forgot";
     $("#auth-heading").textContent =
-      which==="register" ? "Create your account" :
-      which==="sent"     ? "Account created" :
-      which==="setpw"    ? "Choose your password" : "Log in";
+      which==="register"   ? "Create your account" :
+      which==="sent"       ? "Account created" :
+      which==="setpw"      ? "Choose your password" :
+      which==="forgot"     ? "Reset your password" :
+      which==="forgotsent" ? "Password sent" : "Log in";
   }
 
   $("#login-form").addEventListener("submit",async function(e){
@@ -1242,6 +1384,27 @@
   $("#setpw-skip").addEventListener("click",async function(){
     $("#setpw-current").value=""; $("#setpw-new").value=""; $("#setpw-confirm").value="";
     await checkAuth();
+  });
+
+  $("#show-forgot-btn").addEventListener("click",function(){
+    $("#forgot-email").value = $("#login-email").value.trim();
+    showAuthPanel("forgot"); $("#forgot-email").focus();
+  });
+
+  $("#forgot-form").addEventListener("submit",async function(e){
+    e.preventDefault();
+    var s=$("#forgot-status"); s.textContent="Sending…"; s.className="status";
+    var email=$("#forgot-email").value.trim();
+    try{
+      await api("/forgot-password",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({email:email})});
+      $("#forgot-sent-email").textContent=email;
+      showAuthPanel("forgotsent");
+    }catch(err){ s.textContent=err.message; s.className="status err"; }
+  });
+
+  $("#forgot-sent-login").addEventListener("click",function(){
+    showAuthPanel("login"); $("#login-password").focus();
   });
 
   $("#show-register-btn").addEventListener("click",function(){ showAuthPanel("register"); });

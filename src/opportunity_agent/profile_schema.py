@@ -122,6 +122,12 @@ _PERSON_FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec("work_history", "Work history", "list", "e.g. Software Engineer, Acme (2021-2024)"),
     FieldSpec("achievements", "Achievements", "list"),
     FieldSpec("preferred_funding", "Preferred funding", "list"),
+    # Free text, deliberately last and deliberately vague: the boxes above
+    # cannot anticipate everything, and an owner who has something relevant
+    # to say should not have to leave it out because there is no field for
+    # it. Read by discovery and drafting like any other stated fact.
+    FieldSpec("notes", "Anything else", "textarea",
+              "Anything that does not fit the boxes above."),
 )
 
 _COMPANY_FIELDS: tuple[FieldSpec, ...] = (
@@ -139,6 +145,12 @@ _COMPANY_FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec("employee_count", "Number of employees", "number"),
     FieldSpec("past_contracts", "Notable past contracts", "list", "Client, value, year."),
     FieldSpec("certifications", "Certifications and accreditations", "list", "e.g. ISO 9001, CIFOZ grade"),
+    # Free text, deliberately last and deliberately vague: the boxes above
+    # cannot anticipate everything, and an owner who has something relevant
+    # to say should not have to leave it out because there is no field for
+    # it. Read by discovery and drafting like any other stated fact.
+    FieldSpec("notes", "Anything else", "textarea",
+              "Anything that does not fit the boxes above."),
 )
 
 
