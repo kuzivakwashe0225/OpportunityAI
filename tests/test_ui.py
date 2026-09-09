@@ -92,3 +92,36 @@ def test_ui_can_delete_a_profile_and_says_what_that_destroys():
     # the confirmation names the consequences rather than just "are you sure?"
     assert "Delete the profile" in response.text
     assert "cannot be undone" in response.text
+
+
+def test_ui_offers_assisted_input_that_asks_before_saving():
+    """Typing a profile in field by field is the thing people abandon.
+
+    The assist box takes free text; what comes back is offered for review
+    rather than written straight in, so the model never silently overwrites
+    what the owner typed about themselves.
+    """
+    response = client.get("/ui")
+
+    assert "/assist" in response.text
+    assert "Sort this into my profile" in response.text
+    assert "asks you before saving" in response.text
+    assert "data-sug" in response.text
+
+
+def test_ui_carries_contextual_coach_tips_that_can_be_dismissed():
+    response = client.get("/ui")
+
+    assert "coachHtml" in response.text
+    assert "dismissedTips" in response.text
+    # tips are computed from profile state, not a fixed tour
+    assert "praz-codes" in response.text
+    assert "docs-missing-" in response.text
+
+
+def test_ui_respects_reduced_motion():
+    """The depth pass adds movement; anyone who has asked their OS not to
+    animate things must not get it anyway."""
+    response = client.get("/ui")
+
+    assert "prefers-reduced-motion" in response.text

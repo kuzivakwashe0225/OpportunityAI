@@ -141,3 +141,135 @@ def extract_facts_from_text(
         study_level=parsed.get("study_level") or None,
         field=parsed.get("field") or None,
     )
+
+
+# --------------------------------------------------------------------------
+# Free-text profile assist
+# --------------------------------------------------------------------------
+# The CV path above answers one fixed question. This one answers whatever the
+# profile schema currently asks, which is the difference between "extract a
+# CV" and "help someone fill in this form": a tender profile wants a
+# registration number and PRAZ categories, not a study level.
+#
+# The prompt is generated from the schema rather than written out, so adding a
+# FieldSpec in profile_schema.py makes it extractable here with no change to
+# this file. That is deliberate - the alternative is two lists that drift.
+
+_ASSIST_HEADER = """You are helping someone fill in a form. Read their notes below and \
+return ONLY a JSON object using exactly these keys.
+
+Rules that matter more than completeness:
+- Use null (or [] for lists) for anything the notes do not clearly state.
+- Never invent, guess or infer a value that is not in the notes.
+- Do not carry a value over from an example - the examples show format only.
+
+Keys:
+"""
+
+
+def _field_line(spec) -> str:
+    """One line of prompt per field, phrased by the field's own kind."""
+    if spec.kind == "list":
+        shape = "a JSON array of strings, [] if absent"
+    elif spec.kind == "number":
+        shape = "a number, or null"
+    elif spec.kind == "select":
+        allowed = [o for o in spec.options if o]
+        shape = "one of " + ", ".join(repr(o) for o in allowed) + ", or null"
+    else:
+        shape = "a string, or null"
+    hint = f" ({spec.hint})" if spec.hint else ""
+    return f'  "{spec.key}": {shape} - {spec.label}{hint}'
+
+
+def build_assist_prompt(field_specs, text: str) -> str:
+    lines = [_field_line(spec) for spec in field_specs]
+    return (
+        _ASSIST_HEADER
+        + "\n".join(lines)
+        + "\n\nTheir notes:\n---\n"
+        + text[:_MAX_INPUT_CHARS]
+        + "\n---\n\nJSON:"
+    )
+
+
+def _coerce(spec, value: object) -> object | None:
+    """Force a model answer into the shape the field actually accepts.
+
+    Anything that cannot be coerced becomes None rather than being passed
+    through: this output is offered to the owner as a suggestion, and a
+    suggestion in the wrong shape is worse than no suggestion.
+    """
+    if value is None:
+        return None
+    if spec.kind == "list":
+        items = _text_list_from_model(value)
+        return items or None
+    if spec.kind == "number":
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            return value
+        try:
+            text = str(value).strip()
+            return int(text) if text.isdigit() else float(text)
+        except (TypeError, ValueError):
+            return None
+    if spec.kind == "select":
+        allowed = {o.casefold(): o for o in spec.options if o}
+        return allowed.get(str(value).strip().casefold())
+    if isinstance(value, (dict, list)):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def extract_profile_fields(
+    text: str,
+    *,
+    field_specs,
+    base_url: str = DEFAULT_OLLAMA_URL,
+    model: str = DEFAULT_MODEL,
+    client: httpx.Client | None = None,
+) -> dict:
+    """Suggest values for the profile's own fields from free-typed notes.
+
+    Returns only the keys it actually found something for. Callers are
+    expected to *offer* these, not apply them: the owner's typed value is
+    always worth more than a small model's reading of their notes.
+    """
+    prompt = build_assist_prompt(field_specs, text)
+
+    owns_client = client is None
+    http_client = client or httpx.Client(timeout=_TIMEOUT_SECONDS)
+    try:
+        response = http_client.post(
+            f"{base_url}/api/chat",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+                "format": "json",
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+    finally:
+        if owns_client:
+            http_client.close()
+
+    message = payload.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    try:
+        parsed = json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+
+    suggested: dict = {}
+    for spec in field_specs:
+        coerced = _coerce(spec, parsed.get(spec.key))
+        if coerced is not None:
+            suggested[spec.key] = coerced
+    return suggested

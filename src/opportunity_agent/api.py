@@ -24,6 +24,7 @@ from . import profile_schema
 from .connector import fetch_public_page
 from .document_text import extract_text
 from . import egp_session
+from . import extraction_llm as extraction_llm_module
 from .extraction_llm import ExtractedFacts, extract_facts_from_text
 
 app = FastAPI(title="OpportunityAI")
@@ -53,6 +54,16 @@ def _minio_client():
         endpoint=os.environ["MINIO_ENDPOINT"],
         access_key=os.environ["MINIO_ACCESS_KEY"],
         secret_key=os.environ["MINIO_SECRET_KEY"],
+    )
+
+
+def _assist_profile_fields(text: str, field_specs) -> dict:
+    """Suggest field values from free-typed notes. Injection point for tests."""
+    return extraction_llm_module.extract_profile_fields(
+        text,
+        field_specs=field_specs,
+        base_url=os.getenv("OLLAMA_URL", "http://localhost:11434"),
+        model=os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"),
     )
 
 
@@ -628,6 +639,54 @@ def get_profile_schema(
         "missing_documents": sorted(
             profile_schema.missing_document_keys(profile.profile_type, fields, held)
         ),
+    }
+
+
+class AssistRequest(BaseModel):
+    text: str
+
+
+@app.post("/profiles/{profile_id}/assist")
+def assist_profile_fields(
+    profile_id: str,
+    payload: AssistRequest,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Turn free-typed notes into suggested values for this profile's fields.
+
+    Deliberately does **not** save anything. It returns suggestions for the
+    owner to look at and accept, because the form is the record of what they
+    say about themselves and a small local model's reading of their notes is
+    not good enough to overwrite that silently. The same stance as document
+    extraction, which also never overwrites a value the owner typed.
+
+    Which fields it tries to fill comes from the profile's own schema, so a
+    tender profile is asked for a registration number and PRAZ categories
+    while a scholarship profile is asked for a study level - the thing that
+    makes this useful rather than a generic CV parser.
+    """
+    profile = _get_owned_profile(profile_id, account, db)
+    text = (payload.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="there is nothing to read")
+
+    specs = profile_schema.fields_for(profile.profile_type, profile.fields or {})
+    try:
+        suggested = _assist_profile_fields(text, specs)
+    except Exception as error:  # noqa: BLE001 - the model is a remote dependency
+        raise HTTPException(
+            status_code=503,
+            detail=f"could not reach the language model: {type(error).__name__}",
+        ) from error
+
+    # Report which suggestions would land on an empty field and which would
+    # sit against something already filled in, so the UI can let the owner
+    # keep what they wrote without having to compare two screens by eye.
+    existing = profile.fields or {}
+    return {
+        "suggested": suggested,
+        "conflicts": sorted(k for k in suggested if existing.get(k) not in (None, "", [], {})),
     }
 
 
