@@ -167,6 +167,21 @@ Keys:
 """
 
 
+# Field hints are deliberately NOT sent to the model.
+#
+# They are written for a human reading a form - "e.g. GE001", "Client, value,
+# year." - and a small model reads them as data rather than as guidance. On
+# qwen2.5:0.5b the "Client, value, year." hint came back as the past contracts
+# ["Client #1", "Value A year ago", "Year B"]: invented bid history, which in
+# a tender submission is considerably worse than an empty field.
+#
+# Stripping only the "e.g." half was tried first and is not enough, because a
+# hint can be a bare template with no "e.g." in it at all. Telling a template
+# from an explanation by shape is guesswork, and guessing wrong reintroduces
+# fabricated data. The label alone ("Notable past contracts") is the signal
+# the model actually needs, so that is all it gets.
+
+
 def _field_line(spec) -> str:
     """One line of prompt per field, phrased by the field's own kind."""
     if spec.kind == "list":
@@ -178,8 +193,7 @@ def _field_line(spec) -> str:
         shape = "one of " + ", ".join(repr(o) for o in allowed) + ", or null"
     else:
         shape = "a string, or null"
-    hint = f" ({spec.hint})" if spec.hint else ""
-    return f'  "{spec.key}": {shape} - {spec.label}{hint}'
+    return f'  "{spec.key}": {shape} - {spec.label}'
 
 
 def build_assist_prompt(field_specs, text: str) -> str:
@@ -193,6 +207,19 @@ def build_assist_prompt(field_specs, text: str) -> str:
     )
 
 
+# Things a model says when it means "nothing here". Passing these through
+# would put the literal string "N/A" into a profile field, which then travels
+# into a search query and a drafted application.
+_NON_ANSWERS = {
+    "n/a", "na", "n.a.", "none", "null", "nil", "unknown", "not specified",
+    "not stated", "not provided", "not applicable", "-", "--", "tbd", "unspecified",
+}
+
+
+def _is_non_answer(text: str) -> bool:
+    return text.strip().casefold().strip(" .") in _NON_ANSWERS
+
+
 def _coerce(spec, value: object) -> object | None:
     """Force a model answer into the shape the field actually accepts.
 
@@ -203,7 +230,7 @@ def _coerce(spec, value: object) -> object | None:
     if value is None:
         return None
     if spec.kind == "list":
-        items = _text_list_from_model(value)
+        items = [i for i in _text_list_from_model(value) if not _is_non_answer(i)]
         return items or None
     if spec.kind == "number":
         if isinstance(value, bool):
@@ -221,7 +248,9 @@ def _coerce(spec, value: object) -> object | None:
     if isinstance(value, (dict, list)):
         return None
     text = str(value).strip()
-    return text or None
+    if not text or _is_non_answer(text):
+        return None
+    return text
 
 
 def extract_profile_fields(
