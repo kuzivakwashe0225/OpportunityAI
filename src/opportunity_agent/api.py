@@ -143,12 +143,30 @@ def get_current_account(
     return account
 
 
-def _set_session_cookie(response: Response, account_id: str) -> None:
+# Served over TLS in production, so the session cookie should refuse to travel
+# in clear. Off by default because local development is plain HTTP and a
+# `secure` cookie there simply never arrives, which looks exactly like a
+# broken login.
+COOKIES_SECURE = os.getenv("SESSION_COOKIE_SECURE", "").lower() in ("1", "true", "yes")
+# Readable by JavaScript on purpose, and it carries no secret - only the
+# deadline. The token itself stays httponly. Without this the page has no way
+# to know, after a refresh, how long the session it already holds has left.
+SESSION_EXPIRY_COOKIE = "oa_session_expires"
+
+
+def _set_session_cookie(response: Response, account_id: str) -> str:
     token = auth_module.create_session_token(account_id)
+    expires_at = auth_module.session_expires_at()
+    max_age = int(auth_module.TOKEN_TTL.total_seconds())
     response.set_cookie(
         SESSION_COOKIE, token, httponly=True, samesite="lax",
-        max_age=int(auth_module.TOKEN_TTL.total_seconds()),
+        secure=COOKIES_SECURE, max_age=max_age,
     )
+    response.set_cookie(
+        SESSION_EXPIRY_COOKIE, expires_at.isoformat(), httponly=False,
+        samesite="lax", secure=COOKIES_SECURE, max_age=max_age,
+    )
+    return expires_at.isoformat()
 
 
 @app.get("/", include_in_schema=False)
@@ -366,7 +384,28 @@ def change_password(
 @app.post("/logout")
 def logout(response: Response) -> dict[str, str]:
     response.delete_cookie(SESSION_COOKIE)
+    response.delete_cookie(SESSION_EXPIRY_COOKIE)
     return {"status": "logged out"}
+
+
+@app.post("/session/extend")
+def extend_session(
+    response: Response,
+    account: models_db.Account = Depends(get_current_account),
+) -> dict[str, str]:
+    """Push the idle deadline back, because the owner is actually doing something.
+
+    Deliberately its own endpoint rather than a side effect of any authenticated
+    request. If simply reading data extended the session, the page's own
+    background polling would keep a session alive forever with nobody at the
+    keyboard, and the idle timeout would mean nothing. Only activity the client
+    judges meaningful calls this.
+
+    It requires a still-valid session - `get_current_account` sees to that - so
+    an expired session cannot resurrect itself.
+    """
+    expires_at = _set_session_cookie(response, account.id)
+    return {"expires_at": expires_at}
 
 
 @app.get("/me", response_model=AccountOut)

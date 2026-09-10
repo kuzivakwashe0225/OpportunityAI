@@ -125,3 +125,59 @@ def test_ui_respects_reduced_motion():
     response = client.get("/ui")
 
     assert "prefers-reduced-motion" in response.text
+
+
+def test_a_failed_bootstrap_does_not_masquerade_as_being_logged_out():
+    """The "refresh logs me out" bug.
+
+    checkAuth used to wrap the identity check and the whole app bootstrap in
+    one try/catch, so any transient failure showed the login form to a
+    perfectly authenticated user. Only a 401 may do that now.
+    """
+    response = client.get("/ui")
+
+    assert "showBootProblem" in response.text
+    assert "You are still signed in" in response.text
+    assert "err.status===401" in response.text
+
+
+def test_mouse_movement_is_not_treated_as_activity():
+    """A jittery trackpad must not hold a session open forever."""
+    response = client.get("/ui")
+    page = response.text
+
+    # It may be *named* - the code says plainly why it is excluded - but it
+    # must never be wired up.
+    assert 'addEventListener("mousemove"' not in page
+    assert '"mousemove"' not in page.split("function wireActivity()")[1][:800]
+    # what does count: intent, and reading
+    for evt in ["click", "keydown", "input", "submit", "hashchange", "scroll"]:
+        assert evt in page
+
+
+def test_the_user_is_warned_before_the_session_ends():
+    response = client.get("/ui")
+
+    assert "session-warning" in response.text
+    assert "Keep me signed in" in response.text
+    assert "sw-count" in response.text
+
+
+def test_where_the_user_was_is_preserved_across_re_authentication():
+    response = client.get("/ui")
+
+    assert "captureState" in response.text
+    assert "restoreState" in response.text
+    assert "oaResume" in response.text
+    # a password is never part of what gets stashed
+    assert 'el.type==="password"' in response.text
+
+
+def test_the_request_layer_dedupes_retries_and_reports():
+    response = client.get("/ui")
+
+    assert "inflight" in response.text          # deduplication
+    assert "backoffDelay" in response.text      # retry with backoff
+    assert "apiSWR" in response.text            # stale-while-revalidate
+    assert "__oaNet" in response.text           # observability
+    assert "document.hidden" in response.text   # smart polling pauses when unseen

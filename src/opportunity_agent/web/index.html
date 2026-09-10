@@ -53,6 +53,23 @@
     font-size:.82rem;}
   .chip button{border:none;background:none;color:var(--accent);font-size:.95rem;line-height:1;padding:2px;}
 
+  /* ---------- session warning ---------- */
+  #session-warning{position:fixed;inset:0;z-index:60;display:grid;place-items:center;}
+  #session-warning[hidden]{display:none;}
+  .modal-scrim{position:absolute;inset:0;background:rgba(29,38,32,.55);}
+  .modal-box{position:relative;background:var(--surface);border:1px solid var(--line);
+    border-radius:10px;padding:26px;max-width:430px;width:calc(100% - 40px);
+    box-shadow:0 18px 50px rgba(29,38,32,.3);}
+  .modal-box h2{font-size:1.3rem;margin-bottom:8px;}
+  .modal-box p{margin:0;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.9rem;
+    color:var(--ink-soft);line-height:1.55;}
+  #sw-count{color:var(--bad);font-variant-numeric:tabular-nums;}
+  .reconnecting{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:55;
+    background:var(--shell);color:#f2efe6;padding:9px 16px;border-radius:20px;
+    font-family:ui-sans-serif,system-ui,sans-serif;font-size:.82rem;
+    box-shadow:0 6px 20px rgba(29,38,32,.3);}
+  .reconnecting[hidden]{display:none;}
+
   /* ---------- depth ---------- */
   :root{
     --lift-1:0 1px 2px rgba(29,38,32,.06), 0 2px 6px rgba(29,38,32,.05);
@@ -319,6 +336,21 @@
   </div>
 </div>
 
+<!-- Session warning. Lives outside the app shell so it survives a re-render
+     of the view, and is plain markup rather than something a view builds. -->
+<div id="session-warning" hidden>
+  <div class="modal-scrim"></div>
+  <div class="modal-box" role="alertdialog" aria-labelledby="sw-title" aria-describedby="sw-body">
+    <h2 id="sw-title">Still there?</h2>
+    <p id="sw-body">You&rsquo;ll be signed out in <strong id="sw-count">60</strong> seconds
+      because nothing has happened for a while. Your place is saved either way.</p>
+    <div class="row" style="margin-top:18px;">
+      <button class="btn" id="sw-stay" type="button">Keep me signed in</button>
+      <button class="btn plain" id="sw-logout" type="button">Sign out now</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ APP SHELL ============ -->
 <div id="app-shell" hidden>
   <header class="appbar">
@@ -371,10 +403,58 @@
   function showError(msg){$("#error-text").textContent=msg;$("#error-banner").style.display="block";}
   $("#error-dismiss").addEventListener("click",function(){$("#error-banner").style.display="none";});
 
-  async function api(path, options){
+  // ------------------------------------------------------------------
+  // Request layer
+  // ------------------------------------------------------------------
+  // Everything the pages do goes through here, so the behaviours worth having
+  // once - not hammering the server, not giving up on a blip, not showing a
+  // spinner for data we already hold - live here rather than in thirty call
+  // sites.
+
+  var netlog = [];            // observability ring buffer
+  var inflight = {};          // dedup: key -> promise
+  var cache = {};             // stale-while-revalidate: key -> {at, body}
+
+  var RETRY_STATUSES = [429, 500, 502, 503, 504];
+  var MAX_RETRIES = 3;
+
+  function record(entry){
+    entry.at = Date.now();
+    netlog.push(entry);
+    if(netlog.length > 200) netlog.shift();   // bounded: this runs for hours
+  }
+
+  // Exposed for debugging a live session from the console. Deliberately a
+  // function rather than the array itself, so it prints a summary rather than
+  // two hundred rows.
+  window.__oaNet = function(n){
+    var recent = netlog.slice(-(n||25));
+    var failures = netlog.filter(function(e){ return e.error || (e.status>=400); });
+    console.table(recent);
+    console.log("requests:", netlog.length, "| failures:", failures.length,
+                "| dedup hits:", netlog.filter(function(e){return e.dedup;}).length,
+                "| cache hits:", netlog.filter(function(e){return e.cache;}).length,
+                "| retries:", netlog.reduce(function(a,e){return a+(e.retries||0);},0));
+    return recent;
+  };
+
+  function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+
+  function backoffDelay(attempt){
+    // Exponential, with jitter so a server coming back up does not get every
+    // client at once.
+    var base = Math.min(8000, 400 * Math.pow(2, attempt));
+    return base * (0.7 + Math.random() * 0.6);
+  }
+
+  async function rawRequest(path, options){
     var response;
     try { response = await fetch(path, options); }
-    catch(e){ throw new Error("Network error reaching "+path+": "+e.message); }
+    catch(e){
+      var netErr = new Error("Network error reaching "+path+": "+e.message);
+      netErr.isNetwork = true;
+      throw netErr;
+    }
     if(!response.ok){
       var detail="";
       try{ detail=(await response.json()).detail||""; }catch(e){}
@@ -384,6 +464,68 @@
     }
     if(response.status===204) return null;
     return response.json();
+  }
+
+  async function api(path, options){
+    options = options || {};
+    var method = (options.method || "GET").toUpperCase();
+    var key = method+" "+path+"|"+(options.body||"");
+    var started = Date.now();
+
+    // Deduplicate identical in-flight requests. Two panels asking for the
+    // same profile on the same render should cost one round trip.
+    if(inflight[key]){
+      record({path:path, method:method, dedup:true, ms:0});
+      return inflight[key];
+    }
+
+    var attempt = 0;
+    var promise = (async function(){
+      while(true){
+        try{
+          var body = await rawRequest(path, options);
+          record({path:path, method:method, status:200,
+                  ms:Date.now()-started, retries:attempt});
+          if(method==="GET") cache[path] = {at:Date.now(), body:body};
+          return body;
+        }catch(err){
+          var retriable = method==="GET" &&
+            (err.isNetwork || RETRY_STATUSES.indexOf(err.status)!==-1);
+          if(retriable && attempt < MAX_RETRIES){
+            attempt++;
+            await sleep(backoffDelay(attempt));
+            continue;
+          }
+          record({path:path, method:method, status:err.status||0,
+                  ms:Date.now()-started, retries:attempt, error:err.message});
+          throw err;
+        }
+      }
+    })();
+
+    inflight[key] = promise;
+    try { return await promise; }
+    finally { delete inflight[key]; }
+  }
+
+  // Stale-while-revalidate. Hands back what we already have so the page can
+  // paint at once, then refreshes underneath and calls back if it changed.
+  // Used where a slightly old number is much better than an empty panel.
+  function apiSWR(path, maxAgeMs, onFresh){
+    var hit = cache[path];
+    var fresh = api(path).then(function(body){
+      if(onFresh && hit && JSON.stringify(body)!==JSON.stringify(hit.body)) onFresh(body);
+      return body;
+    });
+    if(hit && (Date.now()-hit.at) < (maxAgeMs||30000)){
+      record({path:path, method:"GET", cache:true, ms:0});
+      return Promise.resolve(hit.body);
+    }
+    return fresh;
+  }
+
+  function invalidate(prefix){
+    Object.keys(cache).forEach(function(k){ if(k.indexOf(prefix)===0) delete cache[k]; });
   }
 
   // ---------------- tag inputs ----------------
@@ -489,7 +631,13 @@
   async function renderDashboard(){
     var p=activeProfile();
     if(!p){ location.hash="#/onboarding"; return; }
-    var summary = await api("/profiles/"+p.id+"/summary");
+    // Stale-while-revalidate: if we have last render's numbers, show them at
+    // once and correct them underneath. An almost-current figure beats an
+    // empty panel and a spinner, and this view is read far more than it changes.
+    var summary = await apiSWR("/profiles/"+p.id+"/summary", 30000, function(fresh){
+      state.summary = fresh; renderBadges();
+      if(currentRoute()==="dashboard") renderDashboard();
+    });
     state.summary = summary; renderBadges();
 
     var lastRun = summary.last_run ? new Date(summary.last_run).toLocaleString() : "never";
@@ -1069,10 +1217,25 @@
     if(mark) mark.addEventListener("click",async function(){
       mark.disabled=true;
       var unread=state.notifications.filter(function(n){return !n.read_at;});
-      for(var i=0;i<unread.length;i++){
-        try{ await api("/notifications/"+unread[i].id+"/read",{method:"POST"}); }catch(e){}
+      // Optimistic: the badge clears now, not after N round trips. Marking a
+      // notification read is safe to show early - the worst case is that we
+      // put it back, which is what the rollback below does.
+      var previous = state.notifications.map(function(n){ return Object.assign({},n); });
+      var now = new Date().toISOString();
+      state.notifications = state.notifications.map(function(n){
+        return n.read_at ? n : Object.assign({},n,{read_at:now});
+      });
+      renderBadges(); renderRoute();
+      try{
+        await Promise.all(unread.map(function(n){
+          return api("/notifications/"+n.id+"/read",{method:"POST"});
+        }));
+        invalidate("/notifications");
+      }catch(err){
+        state.notifications = previous;      // roll back to exactly what was there
+        renderBadges(); renderRoute();
+        showError("Couldn't mark those as read: "+err.message);
       }
-      await loadNotifications(); renderRoute();
     });
   }
 
@@ -1524,6 +1687,210 @@
     $("#ob-finish").addEventListener("click",function(){ onboarding.step=1; location.hash="#/dashboard"; });
   }
 
+  // ------------------------------------------------------------------
+  // Sessions
+  // ------------------------------------------------------------------
+  // The rules, in one place because they are easy to get subtly wrong:
+  //
+  //  * The server decides. The token's own expiry ends the session; this code
+  //    only decides when to *ask* for more time, and warns before the deadline
+  //    so nobody loses a half-typed form to a silent 401.
+  //  * Mouse movement is not activity. A cat on a keyboard, a jittery
+  //    trackpad, or a page that never sleeps would all keep a session alive
+  //    forever. Intent is clicks, typing, navigation and scrolling.
+  //  * Reading is activity. Scrolling a long tender document counts, and so
+  //    does sitting on one with the tab visible - but only for a bounded
+  //    while after a real interaction, so an abandoned open tab still dies.
+
+  var SESSION_EXPIRY_COOKIE = "oa_session_expires";
+  var WARN_BEFORE_MS   = 60 * 1000;   // "you have 60 seconds"
+  var MIN_EXTEND_GAP   = 60 * 1000;   // never call extend more than once a minute
+  var READING_GRACE_MS = 10 * 60 * 1000; // how long "still reading" keeps counting
+
+  var session = {
+    expiresAt: null,
+    lastExtend: 0,
+    lastRealInteraction: 0,
+    activitySince: false,
+    warning: false,
+    timer: null,
+    countdown: null,
+  };
+
+  function readExpiryCookie(){
+    var hit = ("; "+document.cookie).split("; "+SESSION_EXPIRY_COOKIE+"=")[1];
+    if(!hit) return null;
+    var raw = decodeURIComponent(hit.split(";")[0]);
+    var when = new Date(raw);
+    return isNaN(when.getTime()) ? null : when;
+  }
+
+  function msLeft(){
+    if(!session.expiresAt) return null;
+    return session.expiresAt.getTime() - Date.now();
+  }
+
+  // Something happened that shows a person is here. Recorded, not acted on -
+  // the ticker decides whether it is worth a round trip.
+  function markActivity(real){
+    session.activitySince = true;
+    if(real) session.lastRealInteraction = Date.now();
+    if(session.warning) dismissWarning(true);
+  }
+
+  function stillReading(){
+    if(document.hidden) return false;
+    return (Date.now() - session.lastRealInteraction) < READING_GRACE_MS;
+  }
+
+  async function extendSession(force){
+    if(!force && (Date.now() - session.lastExtend) < MIN_EXTEND_GAP) return;
+    session.lastExtend = Date.now();
+    session.activitySince = false;
+    try{
+      var out = await api("/session/extend",{method:"POST"});
+      if(out && out.expires_at) session.expiresAt = new Date(out.expires_at);
+    }catch(err){
+      if(err.status===401){ await sessionExpired(); }
+      // Anything else: the deadline stands, we try again on the next tick.
+    }
+  }
+
+  function showWarning(){
+    session.warning = true;
+    $("#session-warning").hidden = false;
+    var tick = function(){
+      var left = Math.max(0, Math.ceil((msLeft()||0)/1000));
+      var el = $("#sw-count"); if(el) el.textContent = left;
+      if(left<=0){ sessionExpired(); }
+    };
+    tick();
+    session.countdown = setInterval(tick, 1000);
+  }
+
+  function dismissWarning(alsoExtend){
+    session.warning = false;
+    $("#session-warning").hidden = true;
+    if(session.countdown){ clearInterval(session.countdown); session.countdown=null; }
+    if(alsoExtend) extendSession(true);
+  }
+
+  function sessionTick(){
+    var left = msLeft();
+    if(left===null) return;
+
+    if(left<=0){ sessionExpired(); return; }
+
+    // Real interaction, or sustained reading, is worth buying more time for.
+    if((session.activitySince || stillReading()) && !session.warning){
+      extendSession(false);
+      return;
+    }
+    if(left<=WARN_BEFORE_MS && !session.warning) showWarning();
+  }
+
+  // ---------------- state preservation ----------------
+  // Where they were and what they had typed, so re-authenticating puts them
+  // back rather than dropping them on a dashboard having lost the lot.
+  function captureState(){
+    var fields = {};
+    $all("#view-root input, #view-root textarea, #view-root select").forEach(function(el){
+      if(!el.id || el.type==="password" || el.type==="file") return;  // never stash a password
+      if(el.type==="checkbox" || el.type==="radio") fields[el.id]=el.checked;
+      else if(el.value) fields[el.id]=el.value;
+    });
+    return {hash:location.hash||"#/dashboard", scrollY:window.scrollY||0,
+            profileId:state.activeProfileId||null, fields:fields, at:Date.now()};
+  }
+
+  function saveState(){
+    try{ sessionStorage.setItem("oaResume", JSON.stringify(captureState())); }catch(e){}
+  }
+
+  function takeSavedState(){
+    try{
+      var raw = sessionStorage.getItem("oaResume");
+      if(!raw) return null;
+      sessionStorage.removeItem("oaResume");
+      var saved = JSON.parse(raw);
+      // An hour-old resume point is not where they are any more.
+      if(!saved || (Date.now()-saved.at) > 3600000) return null;
+      return saved;
+    }catch(e){ return null; }
+  }
+
+  async function restoreState(saved){
+    if(!saved) return;
+    if(saved.profileId){
+      state.activeProfileId = saved.profileId;
+      try{ localStorage.setItem("activeProfileId", saved.profileId); }catch(e){}
+      renderSwitcher();
+    }
+    if(saved.hash && location.hash!==saved.hash){ location.hash = saved.hash; }
+    await renderRoute();
+    Object.keys(saved.fields||{}).forEach(function(id){
+      var el = document.getElementById(id);
+      if(!el) return;
+      if(el.type==="checkbox" || el.type==="radio") el.checked = !!saved.fields[id];
+      else el.value = saved.fields[id];
+    });
+    if(saved.scrollY) window.scrollTo(0, saved.scrollY);
+  }
+
+  async function sessionExpired(){
+    dismissWarning(false);
+    stopSession();
+    stopPolling();
+    saveState();
+    try{ await api("/logout",{method:"POST"}); }catch(e){}
+    state.account=null;
+    showAuthPanel("login");
+    showAuth();
+    var s=$("#login-status");
+    if(s){ s.textContent="Your session timed out. Sign in and we'll put you back where you were.";
+           s.className="status"; }
+  }
+
+  function startSession(expiresAtIso){
+    session.expiresAt = expiresAtIso ? new Date(expiresAtIso) : readExpiryCookie();
+    session.lastRealInteraction = Date.now();
+    session.activitySince = false;
+    session.lastExtend = Date.now();
+    if(session.timer) clearInterval(session.timer);
+    session.timer = setInterval(sessionTick, 5000);
+  }
+
+  function stopSession(){
+    if(session.timer){ clearInterval(session.timer); session.timer=null; }
+    if(session.countdown){ clearInterval(session.countdown); session.countdown=null; }
+    session.expiresAt = null;
+  }
+
+  // What counts. Note what is absent: mousemove, mouseover, focus, resize.
+  function wireActivity(){
+    ["click","keydown","input","change","submit"].forEach(function(evt){
+      document.addEventListener(evt, function(){ markActivity(true); }, true);
+    });
+    // Scrolling is reading, which is working. Throttled - a scroll fires a lot.
+    var lastScroll = 0;
+    window.addEventListener("scroll", function(){
+      var now = Date.now();
+      if(now-lastScroll < 2000) return;
+      lastScroll = now;
+      markActivity(true);
+    }, {passive:true});
+    window.addEventListener("hashchange", function(){ markActivity(true); });
+    // Coming back to the tab is worth re-checking the clock immediately: the
+    // session may well have expired while it was in the background.
+    document.addEventListener("visibilitychange", function(){
+      if(!document.hidden){ session.expiresAt = readExpiryCookie() || session.expiresAt;
+                            sessionTick();
+                            if(state.account) pollOnce(); }
+    });
+    // Losing the page should not lose the form.
+    window.addEventListener("beforeunload", function(){ if(state.account) saveState(); });
+  }
+
   // ---------------- bootstrap ----------------
   async function loadProfiles(){
     if(!TYPES.length){
@@ -1536,25 +1903,96 @@
     state.activeProfileId = (saved && ids.indexOf(saved)!==-1) ? saved : (ids[0]||null);
   }
   async function loadNotifications(){
-    try{ state.notifications = await api("/notifications"); }catch(e){ state.notifications=[]; }
+    try{ state.notifications = await api("/notifications"); }catch(e){
+      // Keep whatever we already had rather than blanking the bell because one
+      // poll failed - an empty list reads as "nothing waiting", which is a lie.
+      if(!state.notifications) state.notifications=[];
+    }
     renderBadges();
   }
+
+  // ---------------- smart polling ----------------
+  // Polls only when someone can actually see the result, and gets quieter when
+  // the server is unhappy instead of retrying into a wall.
+  var poll = {timer:null, base:60000, interval:60000, max:300000, failures:0};
+
+  async function pollOnce(){
+    if(document.hidden) return;          // nobody is looking; do not spend a request
+    if(!state.account) return;
+    try{
+      var fresh = await api("/notifications");
+      state.notifications = fresh;
+      renderBadges();
+      poll.failures = 0;
+      poll.interval = poll.base;
+    }catch(err){
+      if(err.status===401){ await sessionExpired(); return; }
+      poll.failures++;
+      poll.interval = Math.min(poll.max, poll.base * Math.pow(2, poll.failures));
+    }
+    schedulePoll();
+  }
+
+  function schedulePoll(){
+    if(poll.timer) clearTimeout(poll.timer);
+    poll.timer = setTimeout(pollOnce, poll.interval);
+  }
+
+  function startPolling(){ schedulePoll(); }
+  function stopPolling(){ if(poll.timer){ clearTimeout(poll.timer); poll.timer=null; } }
 
   function showApp(){ $("#auth-view").hidden=true; $("#app-shell").hidden=false; }
   function showAuth(){ $("#app-shell").hidden=true; $("#auth-view").hidden=false; }
 
-  async function enterApp(){
+  async function enterApp(skipRender){
     showApp();
     await loadProfiles();
     renderSwitcher();
     await loadNotifications();
     if(!state.profiles.length){ onboarding.step=1; location.hash="#/onboarding"; }
-    renderRoute();
+    if(!skipRender) renderRoute();
+  }
+
+  // Being unable to reach the server is not the same as being signed out.
+  // This used to wrap both the identity check *and* the whole app bootstrap in
+  // one try/catch, so a transient 500 from any panel dumped a perfectly
+  // authenticated user on the login screen - which is what "it logs me out
+  // when I refresh" actually was.
+  function showBootProblem(err){
+    showApp();
+    $("#view-root").innerHTML =
+      "<section class='panel'><h2>Couldn't load your workspace</h2>"+
+      "<p class='muted'>You are still signed in &mdash; this is a problem reaching the "+
+      "server, not your account. "+esc(err.message||"")+"</p>"+
+      "<div class='row' style='margin-top:14px;'>"+
+      "<button class='btn' id='boot-retry' type='button'>Try again</button></div></section>";
+    var b=$("#boot-retry");
+    if(b) b.addEventListener("click",function(){ checkAuth(); });
   }
 
   async function checkAuth(){
-    try{ state.account = await api("/me"); await enterApp(); }
-    catch(err){ showAuth(); }
+    try{
+      state.account = await api("/me");
+    }catch(err){
+      if(err.status===401){
+        stopSession();
+        showAuthPanel("login");
+        showAuth();
+        return;
+      }
+      showBootProblem(err);
+      return;
+    }
+
+    startSession();
+    startPolling();
+    var resume = takeSavedState();
+    try{
+      await enterApp(!!resume);
+      if(resume) await restoreState(resume);
+    }catch(err){
+      showBootProblem(err);
+    }
   }
 
   // The auth panel has four mutually-exclusive states now, so switching is one
@@ -1662,11 +2100,27 @@
   $("#show-register-btn").addEventListener("click",function(){ showAuthPanel("register"); });
   $("#show-login-btn").addEventListener("click",function(){ showAuthPanel("login"); });
   $("#logout-btn").addEventListener("click",async function(){
+    // An explicit sign-out is the one case where we do NOT want to put them
+    // back where they were next time. Leaving a resume point here would
+    // reopen a half-typed form for whoever signs in on this machine next.
+    stopSession();
+    stopPolling();
+    try{ sessionStorage.removeItem("oaResume"); }catch(e){}
     try{ await api("/logout",{method:"POST"}); }catch(e){}
     state=({account:null,profiles:[],activeProfileId:null,notifications:[],opportunities:[],summary:null});
     showAuthPanel("login");
     showAuth();
   });
+
+  $("#sw-stay").addEventListener("click",function(){ dismissWarning(true); });
+  $("#sw-logout").addEventListener("click",function(){
+    dismissWarning(false);
+    stopSession();
+    try{ sessionStorage.removeItem("oaResume"); }catch(e){}
+    $("#logout-btn").click();
+  });
+
+  wireActivity();
 
   checkAuth();
 })();
