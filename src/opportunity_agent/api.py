@@ -1,5 +1,6 @@
 import os
 import secrets
+from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -903,6 +904,71 @@ def delete_document(
     db.commit()
 
 
+@app.post("/profiles/{profile_id}/documents/{document_id}/suggest")
+def suggest_from_document(
+    profile_id: str,
+    document_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Read one uploaded document and suggest values for this profile's fields.
+
+    The older /extract endpoint answers a fixed CV-shaped question - work
+    history, certificates, study level, field - which is the wrong question
+    for a company. A PRAZ registration certificate has no study level on it;
+    it has the supplier category codes that decide which tenders the company
+    may bid on at all, and there was no way to get those off it.
+
+    This asks the profile's own schema instead, so the same upload button
+    means "read my transcript" for a student and "read my PRAZ certificate"
+    for a company. Suggestions are returned for review, never written -
+    same stance as the free-text assist.
+    """
+    profile = _get_owned_profile(profile_id, account, db)
+    document = db.get(models_db.Document, document_id)
+    if document is None or document.profile_id != profile.id:
+        raise HTTPException(status_code=404, detail="document not found")
+
+    client = _minio_client()
+    content = documents_module.download_document(
+        client, document.object_key, bucket=DOCUMENTS_BUCKET
+    )
+    try:
+        text = extract_text(content, document.content_type)
+    except Exception as error:
+        raise HTTPException(
+            status_code=415, detail=f"could not read that file: {error}"
+        ) from error
+
+    if not (text or "").strip():
+        # A scanned certificate is an image in a PDF wrapper. Saying so beats
+        # returning nothing and letting the owner conclude the feature is broken.
+        raise HTTPException(
+            status_code=422,
+            detail="no text could be read from that file - if it is a scan, "
+                   "it would need OCR, which this system does not do",
+        )
+
+    specs = profile_schema.fields_for(profile.profile_type, profile.fields or {})
+    try:
+        suggested = _assist_profile_fields(text, specs)
+    except Exception as error:  # noqa: BLE001 - the model is a remote dependency
+        raise HTTPException(
+            status_code=503,
+            detail=f"could not reach the language model: {type(error).__name__}",
+        ) from error
+
+    existing = profile.fields or {}
+    document.extraction_status = "extracted" if suggested else "skipped"
+    db.commit()
+    return {
+        "document": {"id": document.id, "filename": document.original_filename,
+                     "doc_type": document.doc_type},
+        "suggested": suggested,
+        "conflicts": sorted(k for k in suggested if existing.get(k) not in (None, "", [], {})),
+    }
+
+
 @app.post("/profiles/{profile_id}/documents/{document_id}/extract", response_model=ProfileOut)
 def extract_document(
     profile_id: str,
@@ -1125,6 +1191,19 @@ def profile_summary(
         .order_by(models_db.ProfileDiscoveryRun.completed_at.desc())
         .first()
     )
+    # Why is the queue empty? The system already knows - every opportunity it
+    # could not clear carries the reason - but until now it kept that to
+    # itself and showed a blank dashboard, which reads as "nothing found"
+    # when the truth is "75 things found, all waiting on one field you have
+    # not filled in".
+    stuck: Counter[str] = Counter()
+    for row in rows:
+        if row.stage != "discovered" or row.match_status == "eligible":
+            continue
+        reasons = row.match_reasons or {}
+        for reason in list(reasons.get("unknown") or []) + list(reasons.get("failed") or []):
+            stuck[str(reason)] += 1
+
     return {
         "total": len(rows),
         "awaiting_review": sum(1 for r in rows if r.stage == "drafted"),
@@ -1132,6 +1211,13 @@ def profile_summary(
         "submitted": sum(1 for r in rows if r.stage == "submitted"),
         "not_eligible": sum(1 for r in rows if r.match_status != "eligible" and r.stage == "discovered"),
         "last_run": last_run.completed_at.isoformat() if last_run else None,
+        "last_run_found": last_run.found if last_run else None,
+        "last_run_failures": list(last_run.failures or []) if last_run else [],
+        # Most common first: the one to fix is nearly always the one blocking
+        # the most opportunities.
+        "blockers": [
+            {"reason": reason, "count": count} for reason, count in stuck.most_common(5)
+        ],
     }
 
 

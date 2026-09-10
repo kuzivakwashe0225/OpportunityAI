@@ -53,6 +53,8 @@
     font-size:.82rem;}
   .chip button{border:none;background:none;color:var(--accent);font-size:.95rem;line-height:1;padding:2px;}
 
+  .callout.blocked{border-left-color:var(--warn);background:var(--warn-soft);}
+
   /* ---------- session warning ---------- */
   #session-warning{position:fixed;inset:0;z-index:60;display:grid;place-items:center;}
   #session-warning[hidden]{display:none;}
@@ -646,9 +648,37 @@
         (summary.awaiting_review===1?" is":"s are")+" drafted and waiting for you.</strong><br>"+
         "<span class='muted'>The agent prepared these on its own. Nothing is sent until you approve it.</span></p>"+
         "<a class='btn' href='#/review'>Review them</a></div>"
-      : "<div class='callout'><p><strong>Nothing waiting for you right now.</strong><br><span class='muted'>"+
-        "The agent keeps searching in the background and will queue up anything you're eligible for.</span></p>"+
-        "<button class='btn' id='run-now-btn' type='button'>Search now</button></div>";
+      : (summary.blockers && summary.blockers.length && summary.total)
+        // The queue is empty but the shelf is not. Saying "nothing waiting"
+        // here reads as "nothing found", when the truth is that everything
+        // found is one missing field away from being actionable.
+        ? "<div class='callout blocked'><p><strong>"+summary.blockers[0].count+" of "+
+          summary.total+" are waiting on one thing.</strong><br><span class='muted'>"+
+          esc(blockerSentence(summary.blockers[0].reason))+
+          "</span></p><a class='btn' href='#/profile'>Fix this on your profile</a> "+
+          "<a class='btn plain' href='#/opportunities'>See them anyway</a></div>"
+        : "<div class='callout'><p><strong>Nothing waiting for you right now.</strong><br><span class='muted'>"+
+          "The agent keeps searching in the background and will queue up anything you're eligible for.</span></p>"+
+          "<button class='btn' id='run-now-btn' type='button'>Search now</button></div>";
+
+    // A run that reached the source and found nothing, and a run that could
+    // not reach the source at all, look identical on a dashboard that only
+    // shows counts. They are not the same thing and the second is not the
+    // owner's fault, so it gets said out loud.
+    var sourceTrouble = "";
+    if(summary.last_run_failures && summary.last_run_failures.length){
+      sourceTrouble =
+        "<div class='advice blocked'><strong>The last search couldn't reach a source.</strong>"+
+        "<p class='muted' style='margin:4px 0 0;'>"+
+        esc(String(summary.last_run_failures[0]).slice(0,240))+
+        "</p></div>";
+    } else if(summary.last_run && summary.last_run_found===0){
+      sourceTrouble =
+        "<div class='advice'><strong>The last search came back empty.</strong>"+
+        "<p class='muted' style='margin:4px 0 0;'>Nothing new was published, or the source was "+
+        "unavailable. Anything already found is still on "+
+        "<a href='#/opportunities'>All opportunities</a>.</p></div>";
+    }
 
     $("#view-root").innerHTML =
       coachHtml("dashboard",{profile:p,schema:schemaShim(p)})+
@@ -662,6 +692,7 @@
         stat(summary.approved,"Approved by you")+
         stat(summary.submitted,"Marked submitted")+
       "</div>"+
+      sourceTrouble+
       "<section class='panel'><h2>How this works</h2>"+
       "<p class='muted' style='margin:0 0 10px;'>The agent runs on its own schedule. It searches using your profile, "+
       "checks each opportunity against your eligibility, and drafts a full application for the ones you qualify for.</p>"+
@@ -868,6 +899,7 @@
     var full=await api("/profiles/"+p.id);
     var f=full.fields||{};
     var schema=await api("/profiles/"+p.id+"/schema");
+    state.schema = schema;
     var docs=await api("/profiles/"+p.id+"/documents");
     var creds=[];
     try{ creds=await api("/profiles/"+p.id+"/credentials"); }catch(e){ creds=[]; }
@@ -1182,11 +1214,17 @@
     });
     $all("[data-extract]").forEach(function(b){
       b.addEventListener("click",async function(){
-        b.disabled=true; b.innerHTML="<span class='spinner'></span>Reading…";
+        b.disabled=true; b.innerHTML="<span class='spinner'></span>Reading\u2026";
         try{
-          await api("/profiles/"+profileId+"/documents/"+b.dataset.extract+"/extract",{method:"POST"});
-          renderRoute();
-        }catch(err){ showError(err.message); b.disabled=false; b.textContent="Read it"; }
+          // The schema-aware read, not the old fixed CV one: a PRAZ
+          // certificate should give up its category codes, not be asked for a
+          // study level. Suggestions land in the same review list the
+          // free-text box uses, so nothing is written without a tick.
+          var out = await api("/profiles/"+profileId+"/documents/"+b.dataset.extract+"/suggest",
+                              {method:"POST"});
+          showSuggestions(profileId, out, "from "+(out.document && out.document.filename || "that file"));
+        }catch(err){ showError(err.message); }
+        b.disabled=false; b.textContent="Read it";
       });
     });
     $all("[data-deldoc]").forEach(function(b){
@@ -1262,6 +1300,68 @@
     return Array.isArray(v) ? v.join(", ") : String(v);
   }
 
+  // Shared by the free-text box and by reading a document, so both routes
+  // into the profile behave the same: shown, ticked, then saved.
+  function showSuggestions(profileId, out, whence){
+    var host = $("#assist-results");
+    if(!host){
+      // Reading a document from the Documents panel, which sits above the
+      // assist box - make somewhere to put the answer.
+      var panel = document.createElement("section");
+      panel.className = "panel";
+      panel.id = "doc-suggest-panel";
+      var existing = $("#doc-suggest-panel");
+      if(existing) existing.remove();
+      $("#view-root").insertBefore(panel, $("#view-root").firstChild.nextSibling);
+      panel.innerHTML = "<h2>What it read</h2><div id='assist-results'></div>";
+      host = $("#assist-results");
+    }
+    var keys = Object.keys(out.suggested||{});
+    if(!keys.length){
+      host.innerHTML = "<p class='muted'>Nothing in there matched a field on this profile.</p>";
+      return;
+    }
+    var conflicts = out.conflicts||[];
+    var labels = {};
+    ((state.schema&&state.schema.fields)||[]).forEach(function(f){ labels[f.key]=f.label; });
+    host.innerHTML =
+      "<div style='margin-top:8px;'><h3 style='font-size:.95rem;margin-bottom:2px;'>"+
+      "Found "+keys.length+" thing"+(keys.length===1?"":"s")+" "+esc(whence||"")+"</h3>"+
+      "<p class='muted' style='margin:0 0 8px;'>Untick anything you would rather keep as it is.</p>"+
+      keys.map(function(k){
+        var clash=conflicts.indexOf(k)!==-1;
+        return "<label class='suggestion'>"+
+          "<input type='checkbox' data-sug='"+esc(k)+"'"+(clash?"":" checked")+">"+
+          "<span class='s-body'><span class='s-key'>"+esc(labels[k]||k)+"</span>"+
+          "<span class='s-val'>"+esc(suggestionValueText(out.suggested[k]))+"</span>"+
+          (clash?"<span class='s-warn'>You already have something here \u2014 ticking this replaces it.</span>":"")+
+          "</span></label>";
+      }).join("")+
+      "<div class='row' style='margin-top:14px;'>"+
+      "<button class='btn' id='assist-apply' type='button'>Save the ticked ones</button>"+
+      "<span class='status' id='assist-apply-status'></span></div></div>";
+
+    $("#assist-apply").addEventListener("click",async function(){
+      var chosen={};
+      $all("[data-sug]").forEach(function(cb){
+        if(cb.checked) chosen[cb.dataset.sug]=out.suggested[cb.dataset.sug];
+      });
+      var as=$("#assist-apply-status");
+      if(!Object.keys(chosen).length){
+        as.textContent="Nothing ticked."; as.className="status err"; return;
+      }
+      as.textContent="Saving\u2026"; as.className="status";
+      try{
+        var current=await api("/profiles/"+profileId);
+        await api("/profiles/"+profileId,{method:"PUT",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({fields:Object.assign({},current.fields||{},chosen)})});
+        invalidate("/profiles/"+profileId);
+        renderRoute();
+      }catch(err){ as.textContent=err.message; as.className="status err"; }
+    });
+  }
+
   function wireAssist(profileId, schema){
     var btn=$("#assist-btn"); if(!btn) return;
 
@@ -1327,6 +1427,25 @@
       }catch(err){ st.textContent=err.message; st.className="status err"; }
       finally{ btn.disabled=false; btn.textContent="Sort this into my profile"; }
     });
+  }
+
+  // Match reasons are written for the matcher, not for the owner. This turns
+  // the handful that are actually fixable into an instruction.
+  function blockerSentence(reason){
+    var r = String(reason||"");
+    var m = r.match(/supplier category registration is required:\s*(.+)$/i);
+    if(m){
+      return "They need PRAZ supplier category "+m[1].trim()+", and your profile has no "+
+             "category codes saved. Add the codes from your PRAZ certificate and the agent "+
+             "can tell which of these you are allowed to bid on.";
+    }
+    if(/eligibility requirements have not been verified/i.test(r)){
+      return "The agent could not read the eligibility rules off the source page, so it will "+
+             "not guess. These are listed for you to judge yourself.";
+    }
+    if(/country must be one of/i.test(r)) return r+" - check the country on your profile.";
+    if(/expired/i.test(r)) return "They have closed since they were found.";
+    return r;
   }
 
   // ---------------- coach tips ----------------
