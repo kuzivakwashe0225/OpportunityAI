@@ -512,3 +512,58 @@ def test_an_opportunity_never_awarded_reports_null():
 
     assert body["awarded_to"] is None
     assert body["awarded_at"] is None
+
+
+# --------------------------------------------------------------------------
+# Which search backend gates /run - and which profiles need one at all
+# --------------------------------------------------------------------------
+
+def _clear_search_env(monkeypatch):
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.delenv("SEARXNG_URL", raising=False)
+
+
+def test_run_503s_without_any_search_backend_for_a_profile_that_needs_one(monkeypatch):
+    _clear_search_env(monkeypatch)
+    profile = _profile()
+
+    response = client.post(f"/profiles/{profile['id']}/run")
+
+    assert response.status_code == 503
+    assert "SEARXNG_URL" in response.json()["detail"]
+    assert "TAVILY_API_KEY" in response.json()["detail"]
+
+
+def test_run_accepts_searxng_alone_with_no_tavily_key(monkeypatch):
+    """SearXNG needs no key at all - the gate must not still demand Tavily's."""
+    _clear_search_env(monkeypatch)
+    monkeypatch.setenv("SEARXNG_URL", "http://searxng:8080")
+    monkeypatch.setattr(api, "_pipeline_search", lambda p, api_key, **kw: [])
+    monkeypatch.setattr(api, "_pipeline_fetch", lambda url: None)
+    profile = _profile()
+
+    response = client.post(f"/profiles/{profile['id']}/run")
+
+    assert response.status_code == 200
+
+
+def test_a_tender_profile_never_needed_a_search_backend_at_all(monkeypatch):
+    """The bug this fixes: tenders read the PRAZ eGP board directly (pipeline's
+    is_tender branch, tested in test_pipeline.py) and were still being refused
+    here for a Tavily key they never touch.
+
+    pipeline_module.run_profile_cycle is stubbed rather than let run for real:
+    the point of this test is the gate in api.py, not the eGP fetch, and a
+    unit test must never reach a live government server.
+    """
+    _clear_search_env(monkeypatch)
+    fake_run = models_db.ProfileDiscoveryRun(
+        profile_id="whatever", queries=[], found=0, added=0, drafted=0, failures=[],
+    )
+    monkeypatch.setattr(api.pipeline_module, "run_profile_cycle", lambda *a, **kw: fake_run)
+    profile = _tender_profile()
+    client.put(f"/profiles/{profile['id']}", json={"fields": {"name": "Meshcloud"}})
+
+    response = client.post(f"/profiles/{profile['id']}/run")
+
+    assert response.status_code == 200

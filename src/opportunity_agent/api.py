@@ -1075,8 +1075,16 @@ def run_profile_pipeline(
 ) -> dict[str, object]:
     profile = _get_owned_profile(profile_id, account, db)
     api_key = os.getenv("TAVILY_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=503, detail="TAVILY_API_KEY is not configured")
+    # A tender profile never calls search.py at all - it reads the PRAZ eGP
+    # board directly (pipeline.run_profile_cycle's is_tender branch) - so
+    # gating it on a web-search backend was refusing a search that was never
+    # going to happen. Every other profile type does need one of the two.
+    needs_search_backend = profile.profile_type != "tender"
+    if needs_search_backend and not (os.getenv("SEARXNG_URL") or api_key):
+        raise HTTPException(
+            status_code=503,
+            detail="no search backend is configured - set SEARXNG_URL or TAVILY_API_KEY",
+        )
 
     run = pipeline_module.run_profile_cycle(
         db, profile, api_key=api_key, search_fn=_pipeline_search, fetch_fn=_pipeline_fetch,

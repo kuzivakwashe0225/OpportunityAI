@@ -3,7 +3,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from . import profile_schema
 from .models import PersonalProfile
-from .search import SearchResult, search
+from .search import SearchResult, default_search_fn
 
 
 def build_search_queries(profile, profile_type: str = "scholarship") -> list[str]:
@@ -60,12 +60,22 @@ def build_search_queries(profile, profile_type: str = "scholarship") -> list[str
 def discover(
     profile: PersonalProfile,
     *,
-    api_key: str,
-    search_fn: Callable[..., list[SearchResult]] = search,
+    api_key: str | None = None,
+    search_fn: Callable[..., list[SearchResult]] | None = None,
     max_results: int = 5,
     profile_type: str = "scholarship",
 ) -> list[SearchResult]:
-    """Search public web indexes using profile intent, deduplicating result URLs."""
+    """Search public web indexes using profile intent, deduplicating result URLs.
+
+    search_fn defaults to None rather than a fixed function, and is resolved
+    here via default_search_fn() on every call rather than once at import
+    time. That is what lets SEARXNG_URL in the environment take effect on the
+    next discovery cycle rather than the next deploy - a default bound at
+    def-time would freeze in whichever backend was configured when this
+    module first loaded. api_key is optional for the same reason: SearXNG
+    needs none, and a caller resolved onto it should not have to invent one.
+    """
+    search_fn = search_fn or default_search_fn()
     results: list[SearchResult] = []
     seen_urls: set[str] = set()
     for query in build_search_queries(profile, profile_type):

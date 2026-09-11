@@ -8,7 +8,11 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://opportunity:opportunity@db:5432/opportunity_agent
       OPPORTUNITY_AGENT_STORE_PATH: /data/store.json
-      TAVILY_API_KEY: ${TAVILY_API_KEY:?set TAVILY_API_KEY in .env}
+      # SearXNG (below) is the primary search backend - self-hosted, no
+      # per-query cost or plan cap. Tavily is kept as an optional fallback:
+      # unset SEARXNG_URL and this reverts to exactly the old behaviour.
+      SEARXNG_URL: http://searxng:8080
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       SESSION_SECRET_KEY: "${SESSION_SECRET_KEY:?set SESSION_SECRET_KEY in .env, e.g. via python -c 'import secrets, sys; sys.stdout.write(secrets.token_hex(32))'}"
       # Portal credentials (the owner's eGP login) are encrypted with this.
       # Unset is a valid state: the credentials feature refuses to store
@@ -43,6 +47,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+      searxng:
+        condition: service_started
 
   worker:
     restart: unless-stopped
@@ -51,13 +57,16 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://opportunity:opportunity@db:5432/opportunity_agent
       OPPORTUNITY_AGENT_STORE_PATH: /data/store.json
-      TAVILY_API_KEY: ${TAVILY_API_KEY:?set TAVILY_API_KEY in .env}
+      SEARXNG_URL: http://searxng:8080
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       DISCOVERY_INTERVAL_SECONDS: ${DISCOVERY_INTERVAL_SECONDS:-3600}
     volumes:
       - opportunity-data:/data
     depends_on:
       db:
         condition: service_healthy
+      searxng:
+        condition: service_started
 
   db:
     restart: unless-stopped
@@ -92,6 +101,38 @@ services:
       - "9001:9001"
     volumes:
       - minio-data:/data
+
+  # Self-hosted web search - see search.py's search_via_searxng() docstring
+  # for why: Tavily's free plan is a hard 1,000 requests/month cap with no
+  # pay-as-you-go overage configured, and every profile's discovery cycle can
+  # burn up to ten of those per run. SearXNG aggregates other engines instead
+  # of billing per query, so there is no plan to run out of - the tradeoff is
+  # that heavy use can get *this server's own IP* rate-limited by the
+  # upstream engines it queries, which is an operational problem to watch for,
+  # not a billing one to be surprised by.
+  searxng:
+    restart: unless-stopped
+    image: searxng/searxng:latest
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080/
+      # Required by SearXNG's own startup check - a real secret, not the
+      # settings.yml placeholder, the same way SESSION_SECRET_KEY works above.
+      SEARXNG_SECRET: "${SEARXNG_SECRET:?set SEARXNG_SECRET in .env, e.g. via python -c 'import secrets, sys; sys.stdout.write(secrets.token_hex(32))'}"
+      SEARXNG_VALKEY_URL: valkey://valkey:6379/0
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    depends_on:
+      - valkey
+    # No ports published, deliberately: reached only from inside this compose
+    # network, by service name, from api and worker. Publishing it would put
+    # an unauthenticated open web-search proxy on the public internet - free
+    # anonymous searching for anyone who finds the port, at this server's
+    # bandwidth and reputation cost with the upstream engines.
+
+  valkey:
+    restart: unless-stopped
+    image: valkey/valkey:8-alpine
+    command: valkey-server --save "" --appendonly no
 
 volumes:
   opportunity-data:

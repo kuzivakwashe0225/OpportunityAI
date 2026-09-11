@@ -21,8 +21,16 @@ load_dotenv()
 def main() -> None:
     interval = int(os.getenv("DISCOVERY_INTERVAL_SECONDS", "3600"))
     api_key = os.getenv("TAVILY_API_KEY")
-    if not api_key:
-        raise RuntimeError("TAVILY_API_KEY is not configured")
+    # Not a hard requirement any more: SearXNG needs no key at all, and tender
+    # profiles need neither (they read the PRAZ eGP board directly). Refusing
+    # to start the whole worker over a missing Tavily key would stop tender
+    # discovery too, which never depended on it.
+    if not (os.getenv("SEARXNG_URL") or api_key):
+        print(
+            "worker: no web search backend configured (SEARXNG_URL or "
+            "TAVILY_API_KEY) - tender profiles still run; others will not.",
+            flush=True,
+        )
 
     print(f"worker: starting, interval={interval}s", flush=True)
     while True:

@@ -83,3 +83,41 @@ def test_a_profile_that_is_not_set_up_is_skipped_quietly(accounts, monkeypatch):
 
 def test_the_sweep_works_with_no_accounts_at_all():
     assert worker.run_all_profile_cycles("test-key") == 0
+
+
+# --------------------------------------------------------------------------
+# main()'s startup check
+# --------------------------------------------------------------------------
+# main() itself is an infinite loop and is not unit-tested as a whole; these
+# pin the one thing that changed - it used to hard-crash the entire worker
+# (including tender profiles, which need no search backend at all) whenever
+# TAVILY_API_KEY specifically was unset, even with SearXNG configured.
+
+def test_main_no_longer_requires_tavily_specifically(monkeypatch, capsys):
+    """SearXNG needs no key. A worker with only SEARXNG_URL configured must
+    not refuse to start."""
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setenv("SEARXNG_URL", "http://searxng:8080")
+    monkeypatch.setattr(worker, "run_all_profile_cycles", lambda api_key: 0)
+    monkeypatch.setattr(worker.time, "sleep", lambda *_: (_ for _ in ()).throw(StopIteration))
+
+    with pytest.raises(StopIteration):
+        worker.main()
+
+    assert "starting" in capsys.readouterr().out
+
+
+def test_main_warns_but_does_not_crash_with_no_backend_at_all(monkeypatch, capsys):
+    """Tender profiles read the eGP board directly and need neither backend,
+    so the worker still starts - it just says other profiles will not run."""
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.delenv("SEARXNG_URL", raising=False)
+    monkeypatch.setattr(worker, "run_all_profile_cycles", lambda api_key: 0)
+    monkeypatch.setattr(worker.time, "sleep", lambda *_: (_ for _ in ()).throw(StopIteration))
+
+    with pytest.raises(StopIteration):
+        worker.main()
+
+    out = capsys.readouterr().out
+    assert "no web search backend configured" in out
+    assert "tender profiles still run" in out
