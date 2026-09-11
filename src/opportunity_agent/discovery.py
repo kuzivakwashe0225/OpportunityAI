@@ -6,15 +6,19 @@ import httpx
 
 from . import profile_schema
 from .models import PersonalProfile
-from .search import SearchResult, default_search_fn
+from .search import SearchResult, SearxngDegraded, default_search_fn
 
 # 429 (Too Many Requests) and 403 (Forbidden, how some engines phrase the same
 # thing) both mean "the backend is telling us to stop asking", not "this one
-# query failed". Treated differently from any other per-query error: those
-# are skipped so one bad query does not cost the others (same discipline as
-# egp.py's page-by-page tolerance); these stop the whole cycle outright,
-# because retrying into a rate limit is how a temporary block becomes a
-# longer one.
+# query failed". SearxngDegraded means something adjacent but distinct - the
+# backend itself answered fine, but the engines behind it did not, so the
+# result cannot be trusted as a real answer either. Both are treated the same
+# way here and differently from any other per-query error: an ordinary error
+# is skipped so one bad query does not cost the others (same discipline as
+# egp.py's page-by-page tolerance); these stop the whole cycle outright and -
+# just as importantly - are never handed to cache_set, because caching a
+# degraded non-answer as if it were real is how "brave was rate-limited for
+# five minutes" becomes "no grants exist" for the next six hours.
 _RATE_LIMIT_STATUSES = {429, 403}
 
 
@@ -70,6 +74,8 @@ def build_search_queries(profile, profile_type: str = "scholarship") -> list[str
 
 
 def _is_rate_limit_error(error: Exception) -> bool:
+    if isinstance(error, SearxngDegraded):
+        return True
     return isinstance(error, httpx.HTTPStatusError) and (
         error.response is not None and error.response.status_code in _RATE_LIMIT_STATUSES
     )

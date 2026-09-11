@@ -240,6 +240,36 @@ def test_a_429_stops_the_cycle_but_keeps_what_was_already_found():
     assert len(calls) == 2, "must stop at the failing query, not keep going through the rest"
 
 
+def test_a_degraded_searxng_response_stops_the_cycle_and_is_never_cached():
+    """The actual live bug this fixes: SearXNG answers 200 with zero results
+    while some of its own engines failed, and the old code cached that empty
+    answer as if it were a real "no opportunities" - turning a five-minute
+    upstream hiccup into six hours of false negatives.
+    """
+    from opportunity_agent.search import SearxngDegraded
+
+    profile = PersonalProfile(
+        name="A", field="Computer Science", country="Zimbabwe",
+        interests=["renewables", "agritech"],
+    )
+    calls = []
+    cached = {}
+
+    def degraded_search(query, *, api_key=None, max_results=5):
+        calls.append(query)
+        raise SearxngDegraded("engine(s) unresponsive: brave (too many requests)")
+
+    results = discover(
+        profile, search_fn=degraded_search,
+        cache_get=lambda q: cached.get(q),
+        cache_set=lambda q, r: cached.__setitem__(q, r),
+    )
+
+    assert results == []
+    assert len(calls) == 1, "must stop at the first degraded response, not try every query"
+    assert cached == {}, "a degraded response must never be written to the cache"
+
+
 def test_a_403_is_treated_as_a_rate_limit_too():
     """Some engines phrase a block as 403 rather than 429."""
     profile = PersonalProfile(name="A", field="Computer Science", country="Zimbabwe")

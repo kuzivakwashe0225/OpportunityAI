@@ -78,6 +78,28 @@ def search(
     return [SearchResult(**item) for item in payload.get("results", [])]
 
 
+class SearxngDegraded(RuntimeError):
+    """SearXNG answered (HTTP 200), but at least one of its own engines did not.
+
+    Found live, not anticipated: this server's SearXNG instance returned 200
+    with zero results for a real profile's queries while its own JSON body
+    reported `unresponsive_engines: [["brave", "too many requests"],
+    ["duckduckgo", "timeout"]]`. A per-query httpx status check (429/403)
+    never sees this - SearXNG absorbs the individual engine failures and
+    still answers 200 - so the caller has no way to tell "genuinely no
+    results" from "half the engines were down" without reading this field.
+
+    That distinction matters enormously once caching is involved: caching a
+    degraded answer as if it were a real one means an unlucky moment - a
+    handful of upstream engines rate-limited during a burst of testing, say -
+    gets remembered as "no opportunities exist" for the next
+    SEARCH_CACHE_TTL_MINUTES, actively making the outage worse instead of
+    self-healing on the next attempt. discover() treats this exception the
+    same as a 429/403: stop the rest of this cycle's queries, keep whatever
+    was already found, and - critically - never hand the result to cache_set.
+    """
+
+
 def search_via_searxng(
     query: str,
     *,
@@ -99,6 +121,10 @@ def search_via_searxng(
     instances with json enabled are rare enough (most disable it, and the two
     tested during development were both behind a bot-detection challenge) that
     guessing the shape and finding out later was not an acceptable risk here.
+
+    Raises SearxngDegraded (see its docstring) if any engine SearXNG queried
+    failed on its own instance's side, rather than silently returning
+    whatever partial set of results came back from the ones that worked.
     """
     url = (base_url or os.getenv("SEARXNG_URL", _DEFAULT_SEARXNG_URL)).rstrip("/")
 
@@ -111,6 +137,11 @@ def search_via_searxng(
     finally:
         if owns_client:
             http_client.close()
+
+    unresponsive = payload.get("unresponsive_engines") or []
+    if unresponsive:
+        names = ", ".join(f"{name} ({reason})" for name, reason in unresponsive)
+        raise SearxngDegraded(f"engine(s) unresponsive: {names}")
 
     results: list[SearchResult] = []
     for item in (payload.get("results") or [])[:max_results]:

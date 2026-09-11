@@ -14,7 +14,12 @@ import httpx
 import pytest
 
 from opportunity_agent import search as search_module
-from opportunity_agent.search import SearchResult, default_search_fn, search_via_searxng
+from opportunity_agent.search import (
+    SearchResult,
+    SearxngDegraded,
+    default_search_fn,
+    search_via_searxng,
+)
 
 
 def _client_with(handler):
@@ -148,3 +153,45 @@ def test_tavily_is_the_fallback_when_searxng_is_not_configured(monkeypatch):
 def test_search_without_an_api_key_refuses_rather_than_sending_no_auth():
     with pytest.raises(ValueError):
         search_module.search("query", api_key=None)
+
+
+# --------------------------------------------------------------------------
+# Degraded engines - found live, not anticipated
+# --------------------------------------------------------------------------
+# SearXNG absorbs a failing upstream engine and still answers HTTP 200 - a
+# per-status-code check (429/403) never sees this. Confirmed live: a real
+# profile's queries came back 200 with zero results while the JSON body
+# reported unresponsive_engines for brave and duckduckgo, and the (then
+# brand new) query cache remembered that empty answer as if it were real.
+
+def test_unresponsive_engines_raises_rather_than_returning_a_false_empty_answer():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "results": [],
+            "unresponsive_engines": [["brave", "too many requests"], ["duckduckgo", "timeout"]],
+        })
+
+    with pytest.raises(SearxngDegraded, match="brave"):
+        search_via_searxng("query", base_url="http://searxng:8080", client=_client_with(handler))
+
+
+def test_unresponsive_engines_raises_even_if_some_results_did_come_back():
+    """A partial answer from the engines that survived is not the same as a
+    complete one - caching it under-represents what a healthy search would
+    have found."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "results": [{"url": "https://example.org/x", "title": "Found anyway"}],
+            "unresponsive_engines": [["google cse", "Suspended: too many requests"]],
+        })
+
+    with pytest.raises(SearxngDegraded):
+        search_via_searxng("query", base_url="http://searxng:8080", client=_client_with(handler))
+
+
+def test_no_unresponsive_engines_means_a_normal_return():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"results": [], "unresponsive_engines": []})
+
+    assert search_via_searxng("query", base_url="http://searxng:8080",
+                              client=_client_with(handler)) == []
