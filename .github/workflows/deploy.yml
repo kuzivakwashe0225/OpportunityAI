@@ -45,16 +45,33 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the deploy secrets are actually set
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          # Named individually so a missing one says which, rather than
+          # failing later as an ssh error to "@" that means nothing.
+          missing=""
+          [ -z "$SSH_PRIVATE_KEY" ] && missing="$missing DEPLOY_SSH_KEY"
+          [ -z "$SSH_HOST" ] && missing="$missing DEPLOY_HOST"
+          [ -z "$SSH_USER" ] && missing="$missing DEPLOY_USER"
+          if [ -n "$missing" ]; then
+            echo "Missing repository secret(s):$missing" >&2
+            echo "See .github/workflows/README.md for how to add them." >&2
+            exit 1
+          fi
+          echo "all three secrets present"
+
       - name: Deploy over SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           SSH_HOST: ${{ secrets.DEPLOY_HOST }}
           SSH_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          if [ -z "$SSH_PRIVATE_KEY" ]; then
-            echo "DEPLOY_SSH_KEY is not set - see .github/workflows/README.md" >&2
-            exit 1
-          fi
           mkdir -p ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
@@ -63,31 +80,8 @@ jobs:
           # silently.
           ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
-          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$SSH_USER@$SSH_HOST" bash -s <<'REMOTE'
-            set -euo pipefail
-            cd ~/apps/OpportunityAI
-            git pull --ff-only
-            docker compose up -d --build
-            # searxng's config is a bind-mounted file, so compose does not
-            # recreate the container when only settings.yml changed. Without
-            # this an engine change deploys to disk and nowhere else.
-            docker compose restart searxng
-            docker compose ps
-          REMOTE
-
-      - name: Check the API actually came back up
-        env:
-          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
-          SSH_USER: ${{ secrets.DEPLOY_USER }}
-        run: |
-          # A deploy that leaves the site down should fail loudly rather than
-          # report success because the SSH command exited 0.
+          # The remote half lives in its own file and is piped in. It used to
+          # be a heredoc here and never ran once: a heredoc terminator must be
+          # at column 0, and everything inside `run: |` is indented.
           ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$SSH_USER@$SSH_HOST" \
-            'for i in $(seq 1 20); do
-               code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/health || true)
-               if [ "$code" = "200" ]; then echo "health: 200"; exit 0; fi
-               sleep 3
-             done
-             echo "health check never returned 200" >&2
-             cd ~/apps/OpportunityAI && docker compose logs api --tail 40 >&2
-             exit 1'
+            'bash -s' < .github/scripts/deploy-remote.sh
