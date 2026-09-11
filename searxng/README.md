@@ -38,8 +38,11 @@ actually searches for (opportunity listings - text, not images/video/news):
 | `dogpile` | Itself a metasearch engine - querying it re-exposes us to Google/Yahoo indirectly, defeating the point of trimming the list |
 | `startpage news`, `startpage images` | Wrong category entirely |
 | `brave.images`, `brave.videos`, `brave.news` | Wrong category entirely |
+| `google cse`, `google cse images` | No API key configured (`api_key`/`cx` both unset) - cannot ever return a real result, and confirmed live to be one of the two engines Google suspended for "too many requests" within minutes of this instance going up, for zero benefit in exchange |
 
 `yandex api` ships `inactive: true` upstream already and was left as-is.
+
+**Confirmed live, not hypothetical**: within the first day of running, `/search`'s own `unresponsive_engines` reported `brave` and `google cse` both `"Suspended: too many requests"`, and `duckduckgo` timing out - during development's own verification queries, not yet real user traffic. This is the risk the caching/pacing/backoff in `discovery.py`/`pipeline.py` exists to keep off real usage; it will still happen occasionally to whichever engines stay enabled, which is exactly why the app degrades to "found fewer results this cycle" rather than crashing when it does.
 
 This is a dial, not a fixed decision - if results feel thin for a particular
 profile type, re-enabling an engine here (remove its `disabled: true` line)

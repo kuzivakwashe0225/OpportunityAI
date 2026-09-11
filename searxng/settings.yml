@@ -1232,10 +1232,12 @@ engines:
     shortcut: gov
 
   - name: google cse
+    disabled: true  # opportunity_agent: no API key configured, cannot ever return real results - see searxng/README.md
     engine: google_cse
     shortcut: goc
 
   - name: google cse images
+    disabled: true  # opportunity_agent: no API key configured, cannot ever return real results - see searxng/README.md
     engine: google_cse
     categories: [images, web]
     google_categ: image
