@@ -39,9 +39,22 @@ from pydantic import BaseModel, Field
 from .extraction_llm import (
     DEFAULT_MODEL,
     DEFAULT_OLLAMA_URL,
-    _MAX_INPUT_CHARS,
     _TIMEOUT_SECONDS,
 )
+
+# Deliberately far larger than extraction_llm's 6000-character window, and not
+# shared with it. That limit suits a CV, where everything that matters is near
+# the top. A call for proposals is the opposite shape: the submission address,
+# the closing date and the formatting rules are almost always in the last page,
+# after several pages of programme background. Truncating the head of a real
+# 7,401-character POTRAZ PDF at 6000 dropped precisely the deadline and the
+# email - the extraction reported them as absent, which reads identically to
+# a call that never stated them.
+_SPEC_MAX_CHARS = 18000
+# When even that is not enough, the head and the tail both matter more than
+# the middle, for the same reason.
+_SPEC_HEAD_CHARS = 11000
+_SPEC_TAIL_CHARS = 6000
 
 
 class FormatRules(BaseModel):
@@ -119,8 +132,22 @@ Call text:
 JSON:"""
 
 
+def trim_for_spec(text: str) -> str:
+    """Keep the parts of a call that carry the requirements.
+
+    Head and tail rather than the first N characters: a call opens with the
+    programme background and closes with how, where and by when to submit.
+    Given a choice, the middle is what to lose.
+    """
+    if len(text) <= _SPEC_MAX_CHARS:
+        return text
+    head = text[:_SPEC_HEAD_CHARS]
+    tail = text[-_SPEC_TAIL_CHARS:]
+    return head + "\n\n[...]\n\n" + tail
+
+
 def build_spec_prompt(text: str) -> str:
-    return _PROMPT.format(text=text[:_MAX_INPUT_CHARS])
+    return _PROMPT.format(text=trim_for_spec(text))
 
 
 def _clean_str(value: object) -> str | None:

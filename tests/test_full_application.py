@@ -304,3 +304,28 @@ def test_another_account_cannot_draft_or_export_yours(outbox):
     assert client.post(f"{base}/draft-full", json={}).status_code == 404
     assert client.put(f"{base}/package", json={"sections": []}).status_code == 404
     assert client.get(f"{base}/document").status_code == 404
+
+
+def test_a_long_call_keeps_its_head_and_its_tail():
+    """Where the requirements actually live.
+
+    A call opens with programme background and closes with how, where and by
+    when to submit. Truncating the first N characters of the real 7,401-char
+    POTRAZ PDF dropped the deadline and the email, and the extraction then
+    reported them absent - indistinguishable from a call that never gave them.
+    """
+    head_marker = "OPENS-WITH-BACKGROUND"
+    tail_marker = "submit to research.development@potraz.zw by 3 October 2026"
+    long_call = head_marker + ("filler " * 5000) + tail_marker
+
+    trimmed = application_spec.trim_for_spec(long_call)
+
+    assert trimmed.startswith(head_marker)
+    assert tail_marker in trimmed
+    assert len(trimmed) < len(long_call)
+
+
+def test_a_call_that_fits_is_passed_through_untouched():
+    text = "A short call for proposals."
+
+    assert application_spec.trim_for_spec(text) == text
