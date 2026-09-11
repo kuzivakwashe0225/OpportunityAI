@@ -181,3 +181,24 @@ def test_the_request_layer_dedupes_retries_and_reports():
     assert "apiSWR" in response.text            # stale-while-revalidate
     assert "__oaNet" in response.text           # observability
     assert "document.hidden" in response.text   # smart polling pauses when unseen
+
+
+def test_ui_lets_an_opportunity_be_binned_restored_and_deleted_for_good():
+    """An agent working unattended produces volume - clearing the list has to
+    be possible, recoverable, and separate from destroying the draft."""
+    response = client.get("/ui")
+
+    assert "#/bin" in response.text
+    assert "data-restore" in response.text
+    assert "data-purge" in response.text
+    assert "/trash" in response.text
+    # permanent deletion names what it takes with it
+    assert "cannot be undone" in response.text
+
+
+def test_ui_can_show_an_opportunitys_history():
+    response = client.get("/ui")
+
+    assert "/history" in response.text
+    assert "historyLabel" in response.text
+    assert "Moved to the bin" in response.text

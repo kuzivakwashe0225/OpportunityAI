@@ -55,6 +55,12 @@
 
   .callout.blocked{border-left-color:var(--warn);background:var(--warn-soft);}
 
+  /* ---------- opportunity history ---------- */
+  .opp-history{display:none;margin-top:12px;}
+  ol.history{margin:0;padding-left:18px;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.85rem;}
+  ol.history li{padding:3px 0;color:var(--ink);}
+  ol.history .when{display:block;font-size:.76rem;color:var(--ink-soft);}
+
   /* ---------- session warning ---------- */
   #session-warning{position:fixed;inset:0;z-index:60;display:grid;place-items:center;}
   #session-warning[hidden]{display:none;}
@@ -376,6 +382,7 @@
     <a href="#/opportunities" data-route="opportunities">All opportunities</a>
     <a href="#/profile" data-route="profile">Profile &amp; documents</a>
     <a href="#/notifications" data-route="notifications">Notifications</a>
+    <a href="#/bin" data-route="bin">Bin</a>
     <a href="#/account" data-route="account">Account</a>
   </nav>
 
@@ -610,7 +617,7 @@
   // ---------------- routing ----------------
   var ROUTES = {dashboard:renderDashboard, review:renderReview, opportunities:renderOpportunities,
                 profile:renderProfile, notifications:renderNotifications, onboarding:renderOnboarding,
-                account:renderAccount};
+                account:renderAccount, bin:renderBin};
 
   function currentRoute(){
     var r=(location.hash||"").replace(/^#\//,"");
@@ -816,6 +823,10 @@
       actions.push(btn("dismiss","Not interested","btn small danger"));
     }
     if(o.package) actions.unshift(btn("package","View application","btn small ghost"));
+    // Always available, whatever stage it is at - clearing out a list the
+    // agent filled unattended is tidying, and it is recoverable from the Bin.
+    actions.push(btn("history","History","btn small ghost"));
+    actions.push(btn("trash","Remove","btn small danger"));
 
     return "<article class='opp "+esc(o.match_status)+"' data-id='"+esc(o.id)+"'>"+
       "<div class='opp-head'><h3><a href='"+esc(opp.url)+"' target='_blank' rel='noopener'>"+
@@ -835,7 +846,8 @@
         ":</strong> "+esc(reasons.join("; "))+"</p>" : "")+
       (o.awarded_to ? "" : complianceAdvice(o.compliance))+
       "<div class='opp-actions'>"+actions.join("")+"</div>"+
-      "<div class='package'>"+(o.package?renderPackage(o.package):"")+"</div></article>";
+      "<div class='package'>"+(o.package?renderPackage(o.package):"")+"</div>"+
+      "<div class='opp-history'></div></article>";
   }
 
   // What to do and what to upload, from compliance.py. Blockers first and in
@@ -883,6 +895,33 @@
     if(action==="package"){
       var panel=$(".package",card);
       panel.style.display = panel.style.display==="block" ? "none" : "block";
+      return;
+    }
+    if(action==="history"){
+      var hist=$(".opp-history",card);
+      if(hist.style.display==="block"){ hist.style.display="none"; return; }
+      hist.style.display="block";
+      hist.innerHTML="<p class='muted'>Loading\u2026</p>";
+      try{
+        var events=await api("/profiles/"+p.id+"/opportunities/"+id+"/history");
+        hist.innerHTML = events.length
+          ? "<ol class='history'>"+events.map(function(e){
+              return "<li><strong>"+esc(historyLabel(e.kind))+"</strong>"+
+                (e.detail?" <span class='muted'>("+esc(e.detail)+")</span>":"")+
+                "<span class='when'>"+esc(new Date(e.created_at).toLocaleString())+"</span></li>";
+            }).join("")+"</ol>"
+          : "<p class='muted'>Nothing has happened to this one yet \u2014 the agent found it and "+
+            "it has been sitting here since.</p>";
+      }catch(err){ hist.innerHTML="<p class='status err'>"+esc(err.message)+"</p>"; }
+      return;
+    }
+    if(action==="trash"){
+      button.disabled=true;
+      try{
+        await api("/profiles/"+p.id+"/opportunities/"+id+"/trash",{method:"POST"});
+        invalidate("/profiles/"+p.id);
+        renderRoute();
+      }catch(err){ showError(err.message); button.disabled=false; }
       return;
     }
     button.disabled=true;
@@ -1542,6 +1581,67 @@
       b.addEventListener("click",function(){
         dismissTip(b.dataset.tipclose);
         var box=b.closest(".coach"); if(box) box.remove();
+      });
+    });
+  }
+
+  // ---------------- bin ----------------
+  function historyLabel(kind){
+    var labels={drafted:"Drafted by the agent", approved:"You approved it",
+                dismissed:"You said not interested", submitted:"You marked it submitted",
+                needs_documents:"Waiting on documents", trashed:"Moved to the bin",
+                restored:"Restored from the bin"};
+    return labels[kind] || kind.replace(/_/g," ");
+  }
+
+  async function renderBin(){
+    var p=activeProfile(); if(!p){location.hash="#/onboarding";return;}
+    var items=await api("/profiles/"+p.id+"/opportunities?trashed=true");
+
+    $("#view-root").innerHTML =
+      "<h1 class='view-title'>Bin</h1>"+
+      "<p class='view-sub'>Removed from your lists, kept until you say otherwise. Nothing in here "+
+      "is searched, drafted or counted &mdash; and the agent will not find it again while it sits here.</p>"+
+      (items.length
+        ? "<section class='panel'><h2>In the bin <span class='muted'>("+items.length+")</span></h2>"+
+          items.map(function(o){
+            var opp=o.payload||{};
+            return "<div class='doc-slot' data-binid='"+esc(o.id)+"'>"+
+              "<span class='doc-name'><strong>"+esc(opp.title||"Untitled")+"</strong>"+
+              "<span>"+esc(opp.source||"")+
+              (o.deleted_at?" \u00b7 removed "+esc(new Date(o.deleted_at).toLocaleDateString()):"")+
+              "</span></span>"+
+              "<button class='btn small plain' data-restore='"+esc(o.id)+"'>Restore</button>"+
+              "<button class='btn small danger' data-purge='"+esc(o.id)+"'>Delete forever</button>"+
+              "</div>";
+          }).join("")+
+          "<p class='muted' style='margin-top:14px;font-size:.82rem;'>Deleting for good cannot be "+
+          "undone, and takes the drafted application and its history with it.</p></section>"
+        : "<section class='panel'><p class='empty'>The bin is empty.</p></section>");
+
+    $all("[data-restore]").forEach(function(b){
+      b.addEventListener("click",async function(){
+        b.disabled=true;
+        try{
+          await api("/profiles/"+p.id+"/opportunities/"+b.dataset.restore+"/restore",{method:"POST"});
+          invalidate("/profiles/"+p.id);
+          renderRoute();
+        }catch(err){ showError(err.message); b.disabled=false; }
+      });
+    });
+
+    $all("[data-purge]").forEach(function(b){
+      b.addEventListener("click",async function(){
+        // Names what goes with it rather than a bare "are you sure?" - the
+        // draft and the history are the parts people do not expect to lose.
+        if(!confirm("Delete this permanently?\n\nThe drafted application and its history go too. "+
+                    "This cannot be undone.")) return;
+        b.disabled=true;
+        try{
+          await api("/profiles/"+p.id+"/opportunities/"+b.dataset.purge,{method:"DELETE"});
+          invalidate("/profiles/"+p.id);
+          renderRoute();
+        }catch(err){ showError(err.message); b.disabled=false; }
       });
     });
   }
