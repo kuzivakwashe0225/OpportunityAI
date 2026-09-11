@@ -97,6 +97,13 @@ class SearxngDegraded(RuntimeError):
     self-healing on the next attempt. discover() treats this exception the
     same as a 429/403: stop the rest of this cycle's queries, keep whatever
     was already found, and - critically - never hand the result to cache_set.
+
+    Deliberately raised only when the answer came back *empty* alongside
+    those failures. With a healthy pool it is normal for one or two engines
+    to be blocked or to fail parsing while the others answer fine; a real run
+    returned 28 usable results with three engines failing, and refusing that
+    answer would throw away the very thing we asked for. An empty answer with
+    failures is the only genuinely ambiguous case.
     """
 
 
@@ -138,13 +145,22 @@ def search_via_searxng(
         if owns_client:
             http_client.close()
 
+    raw_results = payload.get("results") or []
     unresponsive = payload.get("unresponsive_engines") or []
-    if unresponsive:
+    # Only a *silent* failure is dangerous. With a healthy pool of engines it
+    # is completely normal for one or two to be rate-limited or to fail
+    # parsing while the rest answer perfectly well - a real run returned 28
+    # good results with brave, duckduckgo and yahoo all failing, and throwing
+    # those away would be far worse than keeping them. The case that must
+    # never be cached is an *empty* answer that arrived alongside failures,
+    # because then there is no way to tell "nothing matches this query" from
+    # "everything we asked was down".
+    if unresponsive and not raw_results:
         names = ", ".join(f"{name} ({reason})" for name, reason in unresponsive)
-        raise SearxngDegraded(f"engine(s) unresponsive: {names}")
+        raise SearxngDegraded(f"no results, and engine(s) unresponsive: {names}")
 
     results: list[SearchResult] = []
-    for item in (payload.get("results") or [])[:max_results]:
+    for item in raw_results[:max_results]:
         item_url = item.get("url")
         if not item_url:
             continue

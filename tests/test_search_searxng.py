@@ -175,18 +175,35 @@ def test_unresponsive_engines_raises_rather_than_returning_a_false_empty_answer(
         search_via_searxng("query", base_url="http://searxng:8080", client=_client_with(handler))
 
 
-def test_unresponsive_engines_raises_even_if_some_results_did_come_back():
-    """A partial answer from the engines that survived is not the same as a
-    complete one - caching it under-represents what a healthy search would
-    have found."""
+def test_results_that_did_come_back_are_kept_even_when_some_engines_failed():
+    """The over-correction this guards against.
+
+    With a healthy pool it is normal for one or two engines to be blocked
+    while the rest answer fine - a real run returned 28 usable results with
+    brave, duckduckgo and yahoo all failing. Refusing that answer would throw
+    away exactly what was asked for. Only an *empty* answer alongside
+    failures is ambiguous enough to reject.
+    """
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={
             "results": [{"url": "https://example.org/x", "title": "Found anyway"}],
-            "unresponsive_engines": [["google cse", "Suspended: too many requests"]],
+            "unresponsive_engines": [["brave", "Suspended: too many requests"],
+                                     ["yahoo", "parsing error"]],
         })
 
-    with pytest.raises(SearxngDegraded):
-        search_via_searxng("query", base_url="http://searxng:8080", client=_client_with(handler))
+    results = search_via_searxng("query", base_url="http://searxng:8080",
+                                 client=_client_with(handler))
+
+    assert [r.url for r in results] == ["https://example.org/x"]
+
+
+def test_an_empty_answer_with_no_engine_failures_is_a_real_zero_and_is_kept():
+    """Nothing matched - that is a genuine answer worth caching, not an outage."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"results": [], "unresponsive_engines": []})
+
+    assert search_via_searxng("query", base_url="http://searxng:8080",
+                              client=_client_with(handler)) == []
 
 
 def test_no_unresponsive_engines_means_a_normal_return():

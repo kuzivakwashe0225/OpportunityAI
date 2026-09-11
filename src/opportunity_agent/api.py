@@ -1031,6 +1031,15 @@ class OpportunityOut(BaseModel):
     # _mark_awarded_elsewhere. None for every non-tender opportunity.
     awarded_to: str | None
     awarded_at: date | None
+    deleted_at: datetime | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class OpportunityEventOut(BaseModel):
+    kind: str
+    detail: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -1105,11 +1114,20 @@ def list_profile_opportunities(
     profile_id: str,
     stage: str | None = None,
     match_status: str | None = None,
+    trashed: bool = False,
     account: models_db.Account = Depends(get_current_account),
     db: Session = Depends(get_db_session),
 ) -> list[models_db.StoredOpportunity]:
     profile = _get_owned_profile(profile_id, account, db)
     query = db.query(models_db.StoredOpportunity).filter_by(profile_id=profile.id)
+    # The bin is opt-in. Without this every list the owner opens would be
+    # padded out with the things they just cleared, which defeats clearing
+    # them - and the whole reason they asked for a bin is that an agent
+    # working unattended produces volume.
+    if trashed:
+        query = query.filter(models_db.StoredOpportunity.deleted_at.isnot(None))
+    else:
+        query = query.filter(models_db.StoredOpportunity.deleted_at.is_(None))
     if stage:
         query = query.filter_by(stage=stage)
     if match_status:
@@ -1128,12 +1146,26 @@ def get_profile_opportunity(
     return _get_owned_opportunity(profile, opportunity_id, db)
 
 
+def _record_event(
+    db: Session, opportunity: models_db.StoredOpportunity, kind: str, detail: str | None = None
+) -> None:
+    """Append to an opportunity's history. Never raises on its own account -
+    losing the audit line is not worth failing the action the owner asked
+    for, and a missing history entry is recoverable where a refused approval
+    is just confusing."""
+    db.add(models_db.OpportunityEvent(
+        opportunity_id=opportunity.id, kind=kind, detail=detail,
+    ))
+
+
 def _set_stage(
     profile_id: str, opportunity_id: str, stage: str, account: models_db.Account, db: Session
 ) -> models_db.StoredOpportunity:
     profile = _get_owned_profile(profile_id, account, db)
     opportunity = _get_owned_opportunity(profile, opportunity_id, db)
+    previous = opportunity.stage
     opportunity.stage = stage
+    _record_event(db, opportunity, stage, f"from {previous}" if previous != stage else None)
     db.commit()
     return opportunity
 
@@ -1183,6 +1215,96 @@ def escalate_opportunity_endpoint(
     profile = _get_owned_profile(profile_id, account, db)
     opportunity = _get_owned_opportunity(profile, opportunity_id, db)
     return pipeline_module.escalate_opportunity(db, opportunity)
+
+
+@app.post("/profiles/{profile_id}/opportunities/{opportunity_id}/trash",
+          response_model=OpportunityOut)
+def trash_opportunity(
+    profile_id: str,
+    opportunity_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> models_db.StoredOpportunity:
+    """Move to the bin. Recoverable - see restore_opportunity."""
+    profile = _get_owned_profile(profile_id, account, db)
+    opportunity = _get_owned_opportunity(profile, opportunity_id, db)
+    if opportunity.deleted_at is None:
+        opportunity.deleted_at = datetime.now(timezone.utc)
+        _record_event(db, opportunity, "trashed")
+        db.commit()
+    return opportunity
+
+
+@app.post("/profiles/{profile_id}/opportunities/{opportunity_id}/restore",
+          response_model=OpportunityOut)
+def restore_opportunity(
+    profile_id: str,
+    opportunity_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> models_db.StoredOpportunity:
+    """Take it back out of the bin, exactly as it was - the stage, the draft
+    and the compliance report were never touched by trashing."""
+    profile = _get_owned_profile(profile_id, account, db)
+    opportunity = _get_owned_opportunity(profile, opportunity_id, db)
+    if opportunity.deleted_at is not None:
+        opportunity.deleted_at = None
+        _record_event(db, opportunity, "restored")
+        db.commit()
+    return opportunity
+
+
+@app.delete("/profiles/{profile_id}/opportunities/{opportunity_id}", status_code=204)
+def delete_opportunity(
+    profile_id: str,
+    opportunity_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> None:
+    """Gone for good.
+
+    Deliberately only permitted from the bin: reaching this by accident from
+    a normal list would destroy a drafted application in one click, and the
+    two-step - trash, then empty - is what makes the irreversible action a
+    considered one. Also clears the notifications and history pointing at it,
+    which would otherwise be left as foreign keys to a row that no longer
+    exists.
+    """
+    profile = _get_owned_profile(profile_id, account, db)
+    opportunity = _get_owned_opportunity(profile, opportunity_id, db)
+    if opportunity.deleted_at is None:
+        raise HTTPException(
+            status_code=409,
+            detail="move it to the bin first - permanent deletion cannot be undone",
+        )
+
+    db.query(models_db.Notification).filter(
+        models_db.Notification.opportunity_id == opportunity.id
+    ).delete(synchronize_session=False)
+    db.query(models_db.OpportunityEvent).filter(
+        models_db.OpportunityEvent.opportunity_id == opportunity.id
+    ).delete(synchronize_session=False)
+    db.delete(opportunity)
+    db.commit()
+
+
+@app.get("/profiles/{profile_id}/opportunities/{opportunity_id}/history",
+         response_model=list[OpportunityEventOut])
+def opportunity_history(
+    profile_id: str,
+    opportunity_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> list[models_db.OpportunityEvent]:
+    """Everything that has happened to this opportunity, oldest first."""
+    profile = _get_owned_profile(profile_id, account, db)
+    opportunity = _get_owned_opportunity(profile, opportunity_id, db)
+    return (
+        db.query(models_db.OpportunityEvent)
+        .filter_by(opportunity_id=opportunity.id)
+        .order_by(models_db.OpportunityEvent.created_at.asc())
+        .all()
+    )
 
 
 @app.get("/profiles/{profile_id}/summary")

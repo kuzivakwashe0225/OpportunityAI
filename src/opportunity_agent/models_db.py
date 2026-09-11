@@ -192,6 +192,13 @@ class StoredOpportunity(Base):
     # workflow, and it can arrive at any stage from "discovered" to "approved".
     awarded_to: Mapped[str | None] = mapped_column(String(500), default=None)
     awarded_at: Mapped[date | None] = mapped_column(Date, default=None)
+    # In the bin, but recoverable. A soft delete rather than a real one
+    # because the agent finds things unattended and in volume: an owner
+    # clearing out a cluttered list is tidying, not making an irreversible
+    # decision, and a mis-click that destroys a tender they later wanted is a
+    # much worse outcome than a row that lingers. Permanent deletion is a
+    # separate, explicit act - see api.py's delete_opportunity.
+    deleted_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=_now)
     updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
 
@@ -276,3 +283,27 @@ class SearchQueryCache(Base):
     backend: Mapped[str] = mapped_column(String(20), primary_key=True)
     results: Mapped[list] = mapped_column(JSON, default=list)
     fetched_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class OpportunityEvent(Base):
+    """What happened to one opportunity, and when.
+
+    The stage column only ever holds the *current* state, so "why is this
+    approved when I remember dismissing it" had no answer. This is the
+    answer: an append-only record of every stage change and every trip to or
+    from the bin, so the owner can see the history of their own decisions
+    rather than being asked to trust the latest one.
+
+    Deliberately not a general audit log - it records the handful of
+    transitions a person actually makes, not every field that changed.
+    """
+
+    __tablename__ = "opportunity_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    opportunity_id: Mapped[str] = mapped_column(
+        ForeignKey("opportunities.id"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    detail: Mapped[str | None] = mapped_column(String(300), default=None)
+    created_at: Mapped[datetime] = mapped_column(default=_now)

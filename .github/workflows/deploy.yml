@@ -1,0 +1,93 @@
+name: Test and deploy
+
+# Deploys on every push to master. Tests run first and a failure stops the
+# deploy - the whole point of automating this is that a broken commit should
+# be harder to ship than a working one, not easier.
+on:
+  push:
+    branches: [master]
+  # Lets a deploy be re-run from the Actions tab without an empty commit,
+  # which is what you want at 2am when the last one failed on a flake.
+  workflow_dispatch:
+
+concurrency:
+  # Two deploys racing onto one server leaves it in whichever state finished
+  # last, which is not necessarily the newest commit. Queue them instead.
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest
+
+      - name: Run the suite
+        env:
+          # auth.py refuses to run without this; the value is irrelevant to
+          # tests, it just must exist. Not a secret - it never signs anything
+          # a real user holds.
+          SESSION_SECRET_KEY: ci-only-not-a-real-secret
+        run: pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          if [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "DEPLOY_SSH_KEY is not set - see .github/workflows/README.md" >&2
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pinned on first use rather than disabling host checking outright,
+          # so a swapped host key fails the deploy instead of being accepted
+          # silently.
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$SSH_USER@$SSH_HOST" bash -s <<'REMOTE'
+            set -euo pipefail
+            cd ~/apps/OpportunityAI
+            git pull --ff-only
+            docker compose up -d --build
+            # searxng's config is a bind-mounted file, so compose does not
+            # recreate the container when only settings.yml changed. Without
+            # this an engine change deploys to disk and nowhere else.
+            docker compose restart searxng
+            docker compose ps
+          REMOTE
+
+      - name: Check the API actually came back up
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          # A deploy that leaves the site down should fail loudly rather than
+          # report success because the SSH command exited 0.
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$SSH_USER@$SSH_HOST" \
+            'for i in $(seq 1 20); do
+               code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/health || true)
+               if [ "$code" = "200" ]; then echo "health: 200"; exit 0; fi
+               sleep 3
+             done
+             echo "health check never returned 200" >&2
+             cd ~/apps/OpportunityAI && docker compose logs api --tail 40 >&2
+             exit 1'
