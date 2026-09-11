@@ -28,6 +28,10 @@ MAX_REDIRECTS = 4
 # disguising the client to get around it.
 USER_AGENT = "OpportunityAI/0.1 (+https://opportunityai.meshcloud.co.zw)"
 
+_DOCX_CONTENT_TYPE = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
+
 
 def _validate_public_url(url: str) -> str:
     """SSRF-check one URL and return the exact URL to request.
@@ -69,6 +73,35 @@ def _validate_public_url(url: str) -> str:
     ))
 
 
+def _decode_body(body: bytes, content_type: str, encoding: str) -> str:
+    """Text out of a response, whatever kind of document it is.
+
+    Decoding everything as text was silently losing the most important pages
+    in the system. Funding calls are very often published as a PDF - the real
+    POTRAZ research call this was found on is a link straight to
+    POTRAZ-...-CALL-FOR-RESEARCH-PROPOSALS.pdf - and running those bytes
+    through .decode() produces binary noise. The opportunity was stored with
+    43 characters of usable text (its title), so everything downstream that
+    reads the call - the eligibility matcher, the requirement extractor, the
+    section drafter - was working from nothing and concluding nothing was
+    there.
+
+    pypdf and python-docx are already dependencies for reading the owner's
+    own uploads, so the same extraction is used here rather than a second
+    implementation. A file that cannot be parsed falls back to the plain
+    decode: worse text is still better than an exception that costs the whole
+    opportunity.
+    """
+    from .document_text import extract_text
+
+    if content_type in ("application/pdf", _DOCX_CONTENT_TYPE):
+        try:
+            return extract_text(body, content_type)
+        except Exception:
+            pass
+    return body.decode(encoding, errors="replace")
+
+
 def fetch_public_page(
     url: str,
     *,
@@ -108,7 +141,7 @@ def fetch_public_page(
                 )
                 return PublicPage(
                     url=target,
-                    content=body.decode(encoding, errors="replace"),
+                    content=_decode_body(body, content_type, encoding),
                     retrieved_at=datetime.now(timezone.utc).isoformat(),
                     sha256=sha256(body).hexdigest(),
                     content_type=content_type,

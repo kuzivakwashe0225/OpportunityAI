@@ -130,3 +130,74 @@ def test_fetch_public_page_enforces_streamed_size_limit():
             max_bytes=3,
             client=httpx.Client(transport=httpx.MockTransport(handler)),
         )
+
+# --------------------------------------------------------------------------
+# Documents that are not HTML
+# --------------------------------------------------------------------------
+# Funding calls are very often published as a PDF. The real POTRAZ research
+# call that exposed this links straight to a .pdf, and decoding those bytes
+# as text stored 43 characters of usable content - so eligibility matching,
+# requirement extraction and section drafting were all reading nothing and
+# concluding nothing was there.
+
+def test_a_pdf_response_is_read_as_text_not_decoded_as_bytes():
+    from io import BytesIO
+
+    from docx import Document as DocxDocument  # noqa: F401  (proves the dep is present)
+
+    # Build a real one-page PDF rather than asserting against a fixture blob.
+    try:
+        from pypdf import PdfWriter
+    except ImportError:  # pragma: no cover
+        import pytest
+        pytest.skip("pypdf not available")
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    buffer = BytesIO()
+    writer.write(buffer)
+    pdf_bytes = buffer.getvalue()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, content=pdf_bytes, headers={"content-type": "application/pdf"}
+        )
+
+    page = fetch_public_page(
+        "https://example.org/call.pdf",
+        client=httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False),
+    )
+
+    assert page.content_type == "application/pdf"
+    # A blank page extracts to little or nothing, but crucially it must not be
+    # the raw "%PDF-1.x" binary header decoded as text.
+    assert not page.content.startswith("%PDF")
+
+
+def test_an_unparseable_pdf_falls_back_rather_than_losing_the_opportunity():
+    """Worse text beats an exception that costs the whole page."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, content=b"not really a pdf at all",
+            headers={"content-type": "application/pdf"},
+        )
+
+    page = fetch_public_page(
+        "https://example.org/broken.pdf",
+        client=httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False),
+    )
+
+    assert "not really a pdf" in page.content
+
+
+def test_html_is_still_decoded_exactly_as_before():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html>hello</html>",
+                              headers={"content-type": "text/html; charset=utf-8"})
+
+    page = fetch_public_page(
+        "https://example.org/page",
+        client=httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False),
+    )
+
+    assert page.content == "<html>hello</html>"
