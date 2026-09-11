@@ -80,3 +80,73 @@ def presigned_url(
 
 def delete_document(client: ObjectStoreClient, key: str, *, bucket: str = DEFAULT_BUCKET) -> None:
     client.remove_object(bucket, key)
+
+
+def build_application_docx(
+    *,
+    title: str,
+    sections: list[dict],
+    format_rules: dict | None = None,
+    applicant: str = "",
+) -> bytes:
+    """The drafted application as a .docx, obeying the call's own format rules.
+
+    A call that specifies Times New Roman 12 at 1.5 spacing is stating
+    grounds for rejection before a word is read, so the rules it stated are
+    applied here rather than printed as instructions for the owner to follow
+    by hand. Anything the call did not state keeps Word's default - guessing
+    a font for a call that never named one would be inventing a requirement.
+
+    Returns bytes rather than writing a file: this is streamed straight to
+    the browser and never needs to exist on disk.
+    """
+    from io import BytesIO
+
+    from docx import Document
+    from docx.shared import Pt
+
+    rules = format_rules or {}
+    document = Document()
+
+    style = document.styles["Normal"]
+    font_name = rules.get("font")
+    if font_name:
+        style.font.name = str(font_name)
+    font_size = rules.get("font_size")
+    if font_size:
+        try:
+            style.font.size = Pt(float(font_size))
+        except (TypeError, ValueError):
+            pass
+
+    spacing = rules.get("line_spacing")
+    if spacing:
+        try:
+            # Calls write this as "1.5" far more often than as "double".
+            style.paragraph_format.line_spacing = float(str(spacing).strip())
+        except (TypeError, ValueError):
+            pass
+
+    document.add_heading(title, level=1)
+    if applicant:
+        document.add_paragraph(applicant)
+
+    for section in sections:
+        heading = str(section.get("title") or "").strip()
+        if heading:
+            document.add_heading(heading, level=2)
+        body = str(section.get("body") or "").strip()
+        if body:
+            for para in body.split("\n\n"):
+                cleaned = para.strip()
+                if cleaned:
+                    document.add_paragraph(cleaned)
+        else:
+            # An empty section is left visible on purpose - a gap the owner
+            # can see and fill beats a document that quietly omits a section
+            # the call requires.
+            document.add_paragraph("[This section still needs to be written.]")
+
+    buffer = BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()

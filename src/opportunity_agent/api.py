@@ -6,7 +6,7 @@ from pathlib import Path
 
 import jwt
 from dotenv import load_dotenv
-from fastapi import Cookie, Depends, FastAPI, File, Form, Response, UploadFile
+from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Form, Response, UploadFile
 from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
@@ -25,7 +25,9 @@ from . import profile_schema
 from .connector import fetch_public_page
 from .document_text import extract_text
 from . import egp_session
+from . import application_spec as application_spec_module
 from . import extraction_llm as extraction_llm_module
+from . import section_drafting as section_drafting_module
 from .extraction_llm import ExtractedFacts, extract_facts_from_text
 
 app = FastAPI(title="OpportunityAI")
@@ -1304,6 +1306,216 @@ def opportunity_history(
         .filter_by(opportunity_id=opportunity.id)
         .order_by(models_db.OpportunityEvent.created_at.asc())
         .all()
+    )
+
+
+class FullDraftRequest(BaseModel):
+    # Lets the owner steer a proposal without editing nine sections by hand
+    # afterwards - "focus on data governance" changes what gets written, not
+    # what gets corrected.
+    steer: str | None = None
+
+
+def _ollama_settings() -> dict:
+    return {
+        "base_url": os.getenv("OLLAMA_URL", "http://localhost:11434"),
+        "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"),
+    }
+
+
+def _page_text_for(opportunity: models_db.StoredOpportunity) -> str:
+    """The call's own words, as far as we have them.
+
+    Prefers the fetched page content the opportunity was built from; falls
+    back to whatever summary was stored. Reading the real page matters here -
+    the format rules and section list are usually in the body, not the blurb.
+    """
+    payload = opportunity.payload or {}
+    for key in ("content", "page_text", "summary", "description"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return str(payload.get("title") or "")
+
+
+def _build_full_draft(
+    opportunity_id: str, profile_id: str, steer: str | None = None
+) -> None:
+    """Read the call, then write each section it asks for.
+
+    Runs in the background because it is slow by nature - a real call asked
+    for nine sections and a 3B model takes roughly a hundred seconds each, so
+    a synchronous request would time out long before finishing. Opens its own
+    session for the same reason: the request that scheduled it is long gone.
+    """
+    session = db_module.SessionLocal()
+    try:
+        opportunity = session.get(models_db.StoredOpportunity, opportunity_id)
+        profile = session.get(models_db.Profile, profile_id)
+        if opportunity is None or profile is None:
+            return
+
+        settings = _ollama_settings()
+        try:
+            spec = application_spec_module.extract_submission_spec(
+                _page_text_for(opportunity), **settings
+            )
+        except Exception:
+            spec = application_spec_module.SubmissionSpec()
+
+        subject = pipeline_module.profile_to_personal_profile(profile)
+        facts = section_drafting_module.profile_facts(subject)
+        if steer:
+            facts += f"\n- What the applicant wants this proposal to focus on: {steer}"
+
+        class _Opp:
+            title = (opportunity.payload or {}).get("title") or "this opportunity"
+            summary = _page_text_for(opportunity)[:1200]
+
+        sections = []
+        for section in spec.sections:
+            body = section_drafting_module.draft_section(
+                section, spec, _Opp(), facts, **settings
+            )
+            sections.append({
+                "title": section.title,
+                "guidance": section.guidance,
+                "body": body,
+            })
+
+        package = dict(opportunity.package or {})
+        package["spec"] = spec.model_dump(mode="json")
+        package["sections"] = sections
+        package["status"] = "ready" if sections else "no_structure_found"
+        opportunity.package = package
+        _record_event(
+            session, opportunity, "full_draft",
+            f"{len(sections)} sections" if sections else "no structure found in the call",
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        opportunity = session.get(models_db.StoredOpportunity, opportunity_id)
+        if opportunity is not None:
+            package = dict(opportunity.package or {})
+            package["status"] = "failed"
+            opportunity.package = package
+            session.commit()
+    finally:
+        session.close()
+
+
+# Injection point, same reason as the others: no test may reach a real model.
+_full_draft_worker = _build_full_draft
+
+
+@app.post("/profiles/{profile_id}/opportunities/{opportunity_id}/draft-full", status_code=202)
+def draft_full_application(
+    profile_id: str,
+    opportunity_id: str,
+    payload: FullDraftRequest,
+    background: BackgroundTasks,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> dict[str, str]:
+    """Write the document this particular call actually asked for.
+
+    Deliberately on demand rather than part of every discovery cycle. Reading
+    a call and drafting its sections costs minutes of model time; doing it
+    unprompted for all 75 tenders sitting on one profile would spend hours
+    writing proposals nobody asked for. The owner picks the one they care
+    about.
+
+    Returns 202 immediately - poll the opportunity and watch package.status.
+    """
+    profile = _get_owned_profile(profile_id, account, db)
+    opportunity = _get_owned_opportunity(profile, opportunity_id, db)
+
+    package = dict(opportunity.package or {})
+    package["status"] = "drafting"
+    opportunity.package = package
+    db.commit()
+
+    background.add_task(
+        _full_draft_worker, opportunity.id, profile.id, payload.steer
+    )
+    return {"status": "drafting"}
+
+
+class PackageEdit(BaseModel):
+    sections: list[dict]
+
+
+@app.put("/profiles/{profile_id}/opportunities/{opportunity_id}/package",
+         response_model=OpportunityOut)
+def edit_application_package(
+    profile_id: str,
+    opportunity_id: str,
+    payload: PackageEdit,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> models_db.StoredOpportunity:
+    """Save the owner's edits.
+
+    The whole point of a draft is that it gets changed. Only the section
+    bodies and titles are taken from the request - the spec read off the call
+    is not the owner's to edit here, because it describes what the call
+    demands rather than what they wrote.
+    """
+    profile = _get_owned_profile(profile_id, account, db)
+    opportunity = _get_owned_opportunity(profile, opportunity_id, db)
+
+    package = dict(opportunity.package or {})
+    package["sections"] = [
+        {
+            "title": str(s.get("title") or "").strip(),
+            "guidance": str(s.get("guidance") or ""),
+            "body": str(s.get("body") or ""),
+        }
+        for s in payload.sections
+    ]
+    package["status"] = "edited"
+    opportunity.package = package
+    _record_event(db, opportunity, "edited", f"{len(package['sections'])} sections")
+    db.commit()
+    return opportunity
+
+
+@app.get("/profiles/{profile_id}/opportunities/{opportunity_id}/document")
+def download_application_document(
+    profile_id: str,
+    opportunity_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> Response:
+    """The drafted application as a .docx, formatted the way the call demands.
+
+    Generated rather than described: a call that says Times New Roman 12 at
+    1.5 spacing is stating grounds for rejection before anyone reads the
+    content, and telling the owner to go and set that themselves is leaving
+    the last, most mechanical step undone.
+    """
+    profile = _get_owned_profile(profile_id, account, db)
+    opportunity = _get_owned_opportunity(profile, opportunity_id, db)
+    package = opportunity.package or {}
+    sections = package.get("sections") or []
+    if not sections:
+        raise HTTPException(
+            status_code=409,
+            detail="draft the full application first - there are no sections to export",
+        )
+
+    blob = documents_module.build_application_docx(
+        title=(opportunity.payload or {}).get("title") or "Application",
+        sections=sections,
+        format_rules=(package.get("spec") or {}).get("format_rules") or {},
+        applicant=(profile.fields or {}).get("name") or "",
+    )
+    filename = "application.docx"
+    return Response(
+        content=blob,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
