@@ -251,3 +251,28 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(default=_now)
 
     account: Mapped["Account"] = relationship(back_populates="notifications")
+
+
+class SearchQueryCache(Base):
+    """Remembers a search query's results for a while.
+
+    The reason this exists: discovery reruns the *same or near-identical*
+    queries every polling cycle for a profile whose fields have not changed,
+    and each one is a real request that fans out to several upstream search
+    engines through SearXNG (see search.py). That is the actual traffic
+    pattern behind "heavy use risks this server's IP getting rate-limited" -
+    not occasional real searches, but redundant ones asking a question
+    already answered an hour ago. Caching the answer removes the redundant
+    half of that traffic without changing what discovery finds.
+
+    Keyed on the literal query string plus which backend answered it, so
+    switching from Tavily to SearXNG (or back) does not serve one backend's
+    stale results under the other's name.
+    """
+
+    __tablename__ = "search_query_cache"
+
+    query: Mapped[str] = mapped_column(String(500), primary_key=True)
+    backend: Mapped[str] = mapped_column(String(20), primary_key=True)
+    results: Mapped[list] = mapped_column(JSON, default=list)
+    fetched_at: Mapped[datetime] = mapped_column(default=_now)

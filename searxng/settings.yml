@@ -837,6 +837,7 @@ engines:
     inactive: true
 
   - name: wikidata
+    disabled: true  # opportunity_agent: not useful for text/tender/job search - see searxng/README.md
     engine: wikidata
     shortcut: wd
     timeout: 3.0
@@ -846,6 +847,7 @@ engines:
     categories: [general]
 
   - name: dogpile
+    disabled: true  # opportunity_agent: not useful for text/tender/job search - see searxng/README.md
     engine: dogpile
     shortcut: dog
     dogpile_categ: search
@@ -2351,6 +2353,7 @@ engines:
     inactive: true  # uses a Proof Of Work captcha https://github.com/searxng/searxng/pull/6669
 
   - name: startpage news
+    disabled: true  # opportunity_agent: not useful for text/tender/job search - see searxng/README.md
     engine: startpage
     startpage_categ: news
     categories: [news, web]
@@ -2358,6 +2361,7 @@ engines:
     inactive: true  # uses a Proof Of Work captcha https://github.com/searxng/searxng/pull/6669
 
   - name: startpage images
+    disabled: true  # opportunity_agent: not useful for text/tender/job search - see searxng/README.md
     engine: startpage
     startpage_categ: images
     categories: [images, web]
@@ -2587,6 +2591,7 @@ engines:
     disabled: true
 
   - name: yandex api
+    disabled: true  # opportunity_agent: not useful for text/tender/job search - see searxng/README.md
     engine: yandex_api
     categories: [general, web]
     shortcut: yda
@@ -2770,6 +2775,7 @@ engines:
     disabled: true
 
   - name: wolframalpha_api
+    disabled: true  # opportunity_agent: not useful for text/tender/job search - see searxng/README.md
     # You can use the engine using the official stable API, but you need an API
     # key.  See: https://products.wolframalpha.com/api/
     engine: wolframalpha_api
@@ -3248,6 +3254,7 @@ engines:
     # brave_spellcheck: true
 
   - name: brave.images
+    disabled: true  # opportunity_agent: not useful for text/tender/job search - see searxng/README.md
     engine: brave
     network: brave
     shortcut: brimg
@@ -3255,6 +3262,7 @@ engines:
     brave_category: images
 
   - name: brave.videos
+    disabled: true  # opportunity_agent: not useful for text/tender/job search - see searxng/README.md
     engine: brave
     network: brave
     shortcut: brvid
@@ -3262,6 +3270,7 @@ engines:
     brave_category: videos
 
   - name: brave.news
+    disabled: true  # opportunity_agent: not useful for text/tender/job search - see searxng/README.md
     engine: brave
     network: brave
     shortcut: brnews

@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from opportunity_agent import egp_awards, models_db, pipeline
+from opportunity_agent import search as search_module
 from opportunity_agent.connector import PublicPage
 from opportunity_agent.db import init_db, make_engine
 from opportunity_agent.search import SearchResult
@@ -543,3 +544,96 @@ def test_a_failed_award_poll_does_not_fail_the_cycle(session, company_profile):
     assert run.found == 1
     assert run.added == 1
     assert session.query(models_db.StoredOpportunity).one().awarded_to is None
+
+
+# --------------------------------------------------------------------------
+# The search query cache - the actual fix for "repeated polling risks the
+# server's IP getting rate-limited by upstream engines"
+# --------------------------------------------------------------------------
+# The real traffic behind that risk is a profile's *unchanged* fields being
+# re-searched every polling cycle. These pin the DB-backed cache pipeline.py
+# hands to discover(), independent of discover()'s own unit tests in
+# test_discovery.py, which only exercise the cache_get/cache_set contract
+# with plain dicts.
+
+from datetime import datetime, timedelta, timezone
+
+
+def _fetch_fn(url):
+    return PublicPage(url=url, content="Open to all.",
+                      retrieved_at="2026-01-01T00:00:00Z", sha256="x", content_type="text/html")
+
+
+def test_a_second_cycle_serves_the_same_query_from_the_database_cache(session, profile, monkeypatch):
+    """Exercises the real discover() and the real cache wiring end to end -
+    search_fn is left at its default (the real discover()) so this proves the
+    thing that actually matters: a second, otherwise-identical cycle must not
+    touch the backend at all.
+    """
+    monkeypatch.setenv("SEARXNG_URL", "http://searxng:8080")
+    calls = []
+
+    def spy_backend(query, *, api_key=None, max_results=5):
+        calls.append(query)
+        return [SearchResult(title="Found", url="https://example.org/found", content="")]
+
+    monkeypatch.setattr(search_module, "search_via_searxng", spy_backend)
+
+    pipeline.run_profile_cycle(session, profile, api_key="k", fetch_fn=_fetch_fn)
+    calls_after_first = len(calls)
+    pipeline.run_profile_cycle(session, profile, api_key="k", fetch_fn=_fetch_fn)
+
+    assert calls_after_first > 0
+    assert len(calls) == calls_after_first, "the second cycle must not re-call the backend at all"
+    assert session.query(models_db.SearchQueryCache).count() > 0
+
+
+def test_the_cache_expires_after_its_ttl(session, profile, monkeypatch):
+    monkeypatch.setenv("SEARXNG_URL", "http://searxng:8080")
+    monkeypatch.setenv("SEARCH_CACHE_TTL_MINUTES", "60")
+    calls = []
+
+    def spy_backend(query, *, api_key=None, max_results=5):
+        calls.append(query)
+        return [SearchResult(title="Found", url="https://example.org/found", content="")]
+
+    monkeypatch.setattr(search_module, "search_via_searxng", spy_backend)
+
+    pipeline.run_profile_cycle(session, profile, api_key="k", fetch_fn=_fetch_fn)
+    calls_after_first = len(calls)
+
+    # Age every cached row past the 60-minute TTL, as if this cycle ran two
+    # hours after the last one.
+    for row in session.query(models_db.SearchQueryCache).all():
+        row.fetched_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    session.commit()
+
+    pipeline.run_profile_cycle(session, profile, api_key="k", fetch_fn=_fetch_fn)
+
+    assert len(calls) > calls_after_first, "an expired entry must be refreshed, not served stale forever"
+
+
+def test_switching_search_backend_does_not_serve_the_others_stale_results(session, profile, monkeypatch):
+    """A row cached while SearXNG was active must not be handed back under
+    Tavily's name once SEARXNG_URL is unset, or vice versa - they are
+    answering the same question through different sources."""
+    monkeypatch.setenv("SEARXNG_URL", "http://searxng:8080")
+    monkeypatch.setattr(
+        search_module, "search_via_searxng",
+        lambda query, **kw: [SearchResult(title="Via SearXNG", url="https://example.org/sx", content="")],
+    )
+
+    pipeline.run_profile_cycle(session, profile, api_key="k", fetch_fn=_fetch_fn)
+    backends = {row.backend for row in session.query(models_db.SearchQueryCache).all()}
+
+    monkeypatch.delenv("SEARXNG_URL", raising=False)
+    monkeypatch.setattr(
+        search_module, "search",
+        lambda query, **kw: [SearchResult(title="Via Tavily", url="https://example.org/tv", content="")],
+    )
+
+    pipeline.run_profile_cycle(session, profile, api_key="k", fetch_fn=_fetch_fn)
+    backends_after = {row.backend for row in session.query(models_db.SearchQueryCache).all()}
+
+    assert backends == {"searxng"}
+    assert backends_after == {"searxng", "tavily"}

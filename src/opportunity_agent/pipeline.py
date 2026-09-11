@@ -32,8 +32,9 @@ degrades to "nothing filtered or flagged this cycle", not a failed cycle.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -43,6 +44,71 @@ from .discovery import build_search_queries, canonicalize_url, discover
 from .drafting import build_application_package
 from .extraction import page_to_opportunity
 from .matching import match_opportunity
+from .search import SearchResult
+
+def _search_cache_ttl() -> timedelta:
+    """How long a query's results are trusted before being asked again.
+
+    Read fresh on every call rather than frozen into a module-level constant
+    at import time - the same discipline as default_search_fn() and
+    auth._idle_ttl(), and for the same reason: a constant computed once would
+    ignore SEARCH_CACHE_TTL_MINUTES set (or changed) after this module first
+    loaded, which is exactly the case a test setting the env var mid-run - or
+    a value changed in .env without a full process restart - needs to work.
+
+    The traffic this exists to cut is a profile's *unchanged* fields being
+    re-searched every polling cycle - 6 hours means a hard refresh happens at
+    most 4 times a day even at the default 1-hour interval, instead of 24.
+    """
+    return timedelta(minutes=int(os.getenv("SEARCH_CACHE_TTL_MINUTES", "360")))
+
+
+def _search_pause_seconds() -> float:
+    """A gap between queries that do reach the network, so one cycle's
+    requests arrive spread out rather than in one burst. Same
+    resolve-fresh-per-call reasoning as _search_cache_ttl() above."""
+    return float(os.getenv("SEARCH_PAUSE_SECONDS", "1.0"))
+
+
+def _cache_backend_name() -> str:
+    """Which backend a cached result actually came from.
+
+    Mirrors the same check default_search_fn() makes, deliberately not
+    `default_search_fn().__name__` - a function's __name__ is only reliable
+    for a plain `def`, and breaks silently (falls back to '<lambda>' or
+    whatever the caller wrapped it in) for anything else. Read fresh each
+    call, same reason discover() resolves its own backend fresh each call:
+    switching SEARXNG_URL on or off must not serve one backend's stale
+    results under the other's name.
+    """
+    return "searxng" if os.getenv("SEARXNG_URL") else "tavily"
+
+
+def _cache_reader(session: Session, backend: str) -> Callable[[str], list[SearchResult] | None]:
+    def cache_get(query: str) -> list[SearchResult] | None:
+        row = session.get(models_db.SearchQueryCache, (query, backend))
+        if row is None:
+            return None
+        fetched_at = row.fetched_at
+        if fetched_at.tzinfo is None:
+            fetched_at = fetched_at.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - fetched_at > _search_cache_ttl():
+            return None
+        return [SearchResult(**item) for item in row.results]
+    return cache_get
+
+
+def _cache_writer(session: Session, backend: str) -> Callable[[str, list[SearchResult]], None]:
+    def cache_set(query: str, results: list[SearchResult]) -> None:
+        payload = [r.model_dump() for r in results]
+        row = session.get(models_db.SearchQueryCache, (query, backend))
+        if row is None:
+            session.add(models_db.SearchQueryCache(query=query, backend=backend, results=payload))
+        else:
+            row.results = payload
+            row.fetched_at = datetime.now(timezone.utc)
+        session.commit()
+    return cache_set
 from .models import Opportunity, OrganisationProfile, PersonalProfile
 from .search import SearchResult
 
@@ -275,8 +341,14 @@ def run_profile_cycle(
                 if egp.tender_id_from_url(str(opportunity.url)) not in awarded
             ]
     else:
+        backend = _cache_backend_name()
         try:
-            results = search_fn(subject, api_key=api_key, profile_type=profile.profile_type)
+            results = search_fn(
+                subject, api_key=api_key, profile_type=profile.profile_type,
+                pause_seconds=_search_pause_seconds(),
+                cache_get=_cache_reader(session, backend),
+                cache_set=_cache_writer(session, backend),
+            )
         except Exception as error:
             return _record_run(session, profile, started_at, queries,
                                found=0, added=0, drafted=0, failures=[f"search: {error}"])

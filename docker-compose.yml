@@ -12,6 +12,8 @@ services:
       # per-query cost or plan cap. Tavily is kept as an optional fallback:
       # unset SEARXNG_URL and this reverts to exactly the old behaviour.
       SEARXNG_URL: http://searxng:8080
+      SEARCH_CACHE_TTL_MINUTES: ${SEARCH_CACHE_TTL_MINUTES:-360}
+      SEARCH_PAUSE_SECONDS: ${SEARCH_PAUSE_SECONDS:-1.0}
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       SESSION_SECRET_KEY: "${SESSION_SECRET_KEY:?set SESSION_SECRET_KEY in .env, e.g. via python -c 'import secrets, sys; sys.stdout.write(secrets.token_hex(32))'}"
       # Portal credentials (the owner's eGP login) are encrypted with this.
@@ -58,6 +60,8 @@ services:
       DATABASE_URL: postgresql+psycopg://opportunity:opportunity@db:5432/opportunity_agent
       OPPORTUNITY_AGENT_STORE_PATH: /data/store.json
       SEARXNG_URL: http://searxng:8080
+      SEARCH_CACHE_TTL_MINUTES: ${SEARCH_CACHE_TTL_MINUTES:-360}
+      SEARCH_PAUSE_SECONDS: ${SEARCH_PAUSE_SECONDS:-1.0}
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       DISCOVERY_INTERVAL_SECONDS: ${DISCOVERY_INTERVAL_SECONDS:-3600}
     volumes:
