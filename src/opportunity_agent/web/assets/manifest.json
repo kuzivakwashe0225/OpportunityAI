@@ -1,0 +1,14 @@
+{
+  "name": "OpportunityAI",
+  "short_name": "OpportunityAI",
+  "description": "Finds scholarships, jobs, grants and tenders for you and drafts the application.",
+  "start_url": "/ui",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f0e8",
+  "theme_color": "#934326",
+  "icons": [
+    { "src": "/assets/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/assets/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

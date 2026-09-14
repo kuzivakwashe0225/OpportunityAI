@@ -3,7 +3,47 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OpportunityAI</title>
+<title>OpportunityAI - Scholarships, Jobs, Grants &amp; Tenders, Found For You</title>
+
+<!-- One indexable page in this whole app - everything past login is a
+     per-account view with nothing for a search engine to usefully rank, so
+     every SEO tag here describes the service itself, not any one page's
+     content. See /robots.txt and /sitemap.xml, both served by api.py, and
+     web/assets/README.md for where the logo/icon files came from. -->
+<meta name="description" content="OpportunityAI finds scholarships, jobs, grants and tenders for you and drafts the application - you review what's worth sending. Free to sign up.">
+<link rel="canonical" href="https://opportunityai.meshcloud.co.zw/ui">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="OpportunityAI">
+<meta property="og:title" content="OpportunityAI - Scholarships, Jobs, Grants &amp; Tenders, Found For You">
+<meta property="og:description" content="It searches on a schedule, checks every result against your eligibility, and drafts a complete application for anything you qualify for. You review what's worth sending.">
+<meta property="og:image" content="https://opportunityai.meshcloud.co.zw/assets/icon-512.png">
+<meta property="og:url" content="https://opportunityai.meshcloud.co.zw/ui">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="OpportunityAI - Scholarships, Jobs, Grants &amp; Tenders, Found For You">
+<meta name="twitter:description" content="Finds opportunities while you're busy. You review what's worth sending.">
+<meta name="twitter:image" content="https://opportunityai.meshcloud.co.zw/assets/icon-512.png">
+
+<link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192.png">
+<link rel="icon" type="image/png" href="/assets/favicon.png">
+<link rel="apple-touch-icon" href="/assets/icon-192.png">
+<link rel="manifest" href="/assets/manifest.json">
+<meta name="theme-color" content="#934326">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "OpportunityAI",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Any (web)",
+  "url": "https://opportunityai.meshcloud.co.zw/ui",
+  "description": "Finds scholarships, jobs, grants and tenders on a schedule, checks eligibility, and drafts a complete application for anything you qualify for.",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "publisher": { "@type": "Organization", "name": "Meshcloud Consultants" }
+}
+</script>
+
 <style>
   :root{
     --bg:#f4f0e8; --surface:#fffdf8; --ink:#18211b; --ink-soft:#5b6a5e;
@@ -37,6 +77,14 @@
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 18px;}
   .muted{color:var(--ink-soft);font-family:ui-sans-serif,system-ui,sans-serif;font-size:.88rem;}
+  /* Sits outside both #auth-view and #app-shell as a plain sibling, so it
+     renders under whichever one is visible without either view needing to
+     know it exists. */
+  #brand-footer{max-width:960px;margin:28px auto 20px;padding:16px 24px 0;
+    display:flex;align-items:center;justify-content:center;gap:8px;
+    border-top:1px solid var(--line);font-family:ui-sans-serif,system-ui,sans-serif;
+    font-size:.78rem;color:var(--ink-soft);}
+  #brand-footer img{height:16px;width:auto;opacity:.85;}
   .status{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.85rem;color:var(--ink-soft);}
   .status.err{color:var(--bad);} .status.ok{color:var(--ok);}
   .spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.45);
@@ -2341,8 +2389,19 @@
 
   wireActivity();
 
+  if("serviceWorker" in navigator){
+    // Best-effort: a failed registration (unsupported browser, blocked by an
+    // extension) must not stop the app itself from working.
+    navigator.serviceWorker.register("/assets/sw.js").catch(function(){});
+  }
+
   checkAuth();
 })();
 </script>
+
+<footer id="brand-footer">
+  <img src="/assets/meshcloud-logo.jpeg" alt="Meshcloud Consultants" width="60" height="16">
+  <span>Powered by Meshcloud Consultants</span>
+</footer>
 </body>
 </html>

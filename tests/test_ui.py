@@ -202,3 +202,88 @@ def test_ui_can_show_an_opportunitys_history():
     assert "/history" in response.text
     assert "historyLabel" in response.text
     assert "Moved to the bin" in response.text
+
+
+# --------------------------------------------------------------------------
+# SEO and branding
+# --------------------------------------------------------------------------
+
+def test_ui_carries_seo_tags_describing_the_service():
+    """The only indexable page in the app - everything past login is a
+    per-account view with nothing a search engine should rank."""
+    response = client.get("/ui")
+
+    assert '<meta name="description"' in response.text
+    assert 'rel="canonical"' in response.text
+    assert 'property="og:title"' in response.text
+    assert 'property="og:description"' in response.text
+    assert 'property="og:image"' in response.text
+    assert 'name="twitter:card"' in response.text
+    assert 'application/ld+json' in response.text
+    assert '"@type": "SoftwareApplication"' in response.text
+
+
+def test_ui_declares_a_pwa_manifest_and_icons():
+    response = client.get("/ui")
+
+    assert 'rel="manifest"' in response.text
+    assert '/assets/manifest.json' in response.text
+    assert 'rel="icon"' in response.text
+    assert 'serviceWorker' in response.text
+    assert '/assets/sw.js' in response.text
+
+
+def test_ui_credits_meshcloud_consultants_on_every_page():
+    """A plain sibling of both #auth-view and #app-shell, so it renders
+    under whichever one is visible without either view needing to know it
+    exists - logged in or not, it's on the page."""
+    response = client.get("/ui")
+
+    assert "Powered by Meshcloud Consultants" in response.text
+    assert "/assets/meshcloud-logo.jpeg" in response.text
+    # sits outside both view containers, not nested inside either
+    auth_pos = response.text.index('id="auth-view"')
+    shell_pos = response.text.index('id="app-shell"')
+    footer_pos = response.text.index('id="brand-footer"')
+    assert footer_pos > auth_pos
+    assert footer_pos > shell_pos
+
+
+def test_robots_txt_allows_the_public_page_and_blocks_the_api():
+    response = client.get("/robots.txt")
+
+    assert response.status_code == 200
+    assert "Allow: /ui" in response.text
+    assert "Disallow: /profiles" in response.text
+    assert "Disallow: /notifications" in response.text
+    assert "Sitemap:" in response.text
+    assert "sitemap.xml" in response.text
+
+
+def test_sitemap_lists_the_one_public_url():
+    response = client.get("/sitemap.xml")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/xml")
+    assert "<loc>" in response.text
+    assert "/ui</loc>" in response.text
+
+
+def test_static_assets_are_actually_served():
+    """The exact trap web/index.html itself hit once before: a file present
+    in the source tree but missing from pyproject's package-data ships fine
+    from an editable install and silently 404s from the built image."""
+    for path in ("/assets/meshcloud-logo.jpeg", "/assets/manifest.json",
+                "/assets/sw.js", "/assets/icon-512.png", "/assets/icon-192.png",
+                "/assets/favicon.png"):
+        response = client.get(path)
+        assert response.status_code == 200, f"{path} did not serve"
+
+
+def test_the_manifest_itself_is_valid_and_points_at_real_icon_files():
+    manifest = client.get("/assets/manifest.json").json()
+
+    assert manifest["name"] == "OpportunityAI"
+    assert manifest["start_url"] == "/ui"
+    for icon in manifest["icons"]:
+        assert client.get(icon["src"]).status_code == 200

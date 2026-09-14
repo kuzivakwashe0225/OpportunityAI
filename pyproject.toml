@@ -36,7 +36,13 @@ test = [
 # the Docker image build does a real, non-editable `pip install .`; local dev
 # has been using `pip install -e .` (editable), which points straight at the
 # source tree and never exercises the packaging step this depends on.
-opportunity_agent = ["web/*.html"]
+#
+# web/assets/* is the same trap waiting to happen again: api.py's StaticFiles
+# mount reads straight off disk at request time, not at import time, so a
+# missing entry here would not even fail loudly - the logo and PWA icons
+# would just 404 in production while every local/editable install kept
+# working fine.
+opportunity_agent = ["web/*.html", "web/assets/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

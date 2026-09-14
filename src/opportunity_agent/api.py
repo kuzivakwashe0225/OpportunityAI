@@ -8,7 +8,8 @@ import jwt
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Form, Response, UploadFile
 from fastapi import HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -34,10 +35,24 @@ app = FastAPI(title="OpportunityAI")
 _UI_PAGE = (Path(__file__).parent / "web" / "index.html").read_text(encoding="utf-8")
 db_module.init_db()
 
+# The logo and PWA icons - see web/assets/README.md for where they came from
+# and why the icon set is a tight crop of just the mark, not the wordmark.
+# Mounted under /assets rather than embedded as data URIs: a favicon and PWA
+# icons are referenced by URL by the browser itself (manifest.json, <link
+# rel="icon">), not fetched by our own JS, so they need a real path to sit at.
+app.mount(
+    "/assets",
+    StaticFiles(directory=Path(__file__).parent / "web" / "assets"),
+    name="assets",
+)
+
 SESSION_COOKIE = "session"
 TEMP_PASSWORD_TTL = timedelta(days=7)
 MIN_PASSWORD_LENGTH = 10
+# The one canonical public URL - used for SEO's canonical/OG tags and the
+# emailed password link alike, so both always point at the same address.
 APP_URL = os.getenv("APP_URL", "https://opportunityai.meshcloud.co.zw/ui")
+PUBLIC_ORIGIN = APP_URL.rsplit("/ui", 1)[0]
 
 # Injection point so tests never open a real SMTP connection.
 _send_mail = mailer.send
@@ -177,6 +192,48 @@ def root() -> RedirectResponse:
     """A user typing just the domain name should land somewhere real, not a
     bare JSON 404 - found by the owner doing exactly that on the live deploy."""
     return RedirectResponse(url="/ui")
+
+
+@app.get("/robots.txt", include_in_schema=False, response_class=PlainTextResponse)
+def robots() -> str:
+    """Let /ui be found and indexed; keep crawlers off the JSON API.
+
+    Everything else in this app is either an authenticated JSON endpoint
+    (returns 401 with nothing worth indexing anyway) or a per-account page
+    behind login - /ui is the one page meant to be found by someone typing
+    "scholarships zimbabwe" into a search engine, and the only one that
+    should spend any crawl budget at all.
+    """
+    return "\n".join([
+        "User-agent: *",
+        "Allow: /ui",
+        "Allow: /assets/",
+        "Disallow: /profiles",
+        "Disallow: /notifications",
+        "Disallow: /me",
+        "Disallow: /register",
+        "Disallow: /login",
+        "",
+        f"Sitemap: {PUBLIC_ORIGIN}/sitemap.xml",
+    ])
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+def sitemap() -> Response:
+    """One URL. There is exactly one public, indexable page in this app -
+    every other route is either an API endpoint or requires an account - so a
+    sitemap generator would be solving a problem this app does not have."""
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        "  <url>\n"
+        f"    <loc>{PUBLIC_ORIGIN}/ui</loc>\n"
+        "    <changefreq>weekly</changefreq>\n"
+        "    <priority>1.0</priority>\n"
+        "  </url>\n"
+        "</urlset>\n"
+    )
+    return Response(content=body, media_type="application/xml")
 
 
 @app.get("/health")
