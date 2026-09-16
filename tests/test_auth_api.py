@@ -41,15 +41,16 @@ def test_registration_is_open_to_more_than_one_account():
     assert register(email="second@example.com").status_code == 201
 
 
-def test_registering_the_same_email_twice_is_rejected():
-    # only reachable in practice if the single-account gate above didn't
-    # already block it, but this is the right error if it ever does apply
+def test_registering_the_same_email_twice_answers_as_if_it_worked():
+    """It used to answer 409, which told anyone who asked whether an address
+    had an account here. Now both cases answer identically and the difference
+    goes to the mailbox, where only the owner of the address sees it."""
     register(email="owner@example.com")
     client.cookies.clear()
 
     response = client.post("/register", json={"email": "owner@example.com"})
 
-    assert response.status_code == 409
+    assert response.status_code == 201
 
 
 def test_login_with_correct_credentials_succeeds(outbox):

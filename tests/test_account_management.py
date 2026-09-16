@@ -90,10 +90,15 @@ def test_a_reset_forces_the_password_to_be_replaced_at_next_sign_in(outbox):
     assert body["must_change_password"] is True
 
 
-def test_forgot_password_for_an_unknown_address_is_a_404(outbox):
+def test_forgot_password_for_an_unknown_address_gives_nothing_away(outbox):
+    """Answers exactly as it does for a real account. It used to answer 404,
+    which let anyone test a list of addresses against a system holding tax
+    certificates and procurement logins. Nothing is sent, because there is
+    nobody to send it to."""
     response = client.post("/forgot-password", json={"email": "nobody@example.com"})
 
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.json()["status"] == "sent"
     assert outbox == []
 
 

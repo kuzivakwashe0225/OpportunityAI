@@ -6,7 +6,7 @@ from pathlib import Path
 
 import jwt
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Form, Response, UploadFile
+from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Form, Request, Response, UploadFile
 from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -29,6 +29,7 @@ from . import egp_session
 from . import application_spec as application_spec_module
 from . import extraction_llm as extraction_llm_module
 from . import section_drafting as section_drafting_module
+from . import throttle as throttle_module
 from .extraction_llm import ExtractedFacts, extract_facts_from_text
 
 app = FastAPI(title="OpportunityAI")
@@ -45,6 +46,51 @@ app.mount(
     StaticFiles(directory=Path(__file__).parent / "web" / "assets"),
     name="assets",
 )
+
+# Set once TLS is terminated in front of this (Caddy does, on
+# opportunityai.meshcloud.co.zw). Off by default so local development over
+# http://localhost still works - a Secure cookie is simply never sent there,
+# which would lock a developer out of their own machine with no error to read.
+HSTS_ENABLED = os.getenv("HSTS_ENABLED", "").lower() in ("1", "true", "yes")
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Headers every response carries, whatever produced it.
+
+    Each one closes a specific hole rather than being here for a checklist:
+
+    nosniff       - a document the owner uploaded is served back by its
+                    declared type or not at all. Without it a browser may
+                    decide an uploaded .txt is really HTML and run it, on our
+                    origin, with the session cookie attached.
+    frame-ancestors - nobody may put this page in an iframe and collect
+                    clicks meant for it. DENY rather than SAMEORIGIN: nothing
+                    here frames itself.
+    referrer      - opportunity URLs are visited by the user from our pages;
+                    without this, the full path they came from travels to
+                    whichever site they open next.
+    permissions   - this app has no use for a camera, a microphone or a
+                    location, and saying so means a compromised script cannot
+                    ask for one either.
+    HSTS          - only once TLS is actually in front, and only when
+                    switched on deliberately: sending it from a deployment
+                    that cannot do HTTPS bricks that hostname in every
+                    browser that saw it, for the length of the max-age.
+    """
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy", "camera=(), microphone=(), geolocation=(), interest-cohort=()"
+    )
+    if HSTS_ENABLED:
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
+
 
 SESSION_COOKIE = "session"
 TEMP_PASSWORD_TTL = timedelta(days=7)
@@ -241,8 +287,12 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/register", response_model=AccountOut, status_code=201)
-def register(payload: RegisterRequest, db: Session = Depends(get_db_session)) -> models_db.Account:
+@app.post("/register", status_code=201)
+def register(
+    payload: RegisterRequest,
+    request: Request,
+    db: Session = Depends(get_db_session),
+) -> dict[str, str]:
     """Create an account and email its first password to the address given.
 
     The password is generated here, not chosen by the caller, and it is never
@@ -257,12 +307,30 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db_session)) ->
     email = payload.email.strip().lower()
     if "@" not in email or "." not in email.split("@")[-1]:
         raise HTTPException(status_code=422, detail="a valid email address is required")
+
+    _check_mail_throttle(request, email)
+
     if db.query(models_db.Account).filter_by(email=email).first() is not None:
-        # Note this does leak whether an address is registered. That is a
-        # deliberate trade for a system with a named, known set of users: the
-        # alternative - reporting success and sending nothing - makes "I never
-        # got the email" unanswerable.
-        raise HTTPException(status_code=409, detail="an account with this email already exists")
+        # This used to answer 409, and said in a comment that leaking whether
+        # an address is registered was a deliberate trade for a system with a
+        # named, known set of users. That premise is gone: strangers can reach
+        # this endpoint now, and a 409 lets anyone test a list of addresses
+        # against a system holding tax certificates and procurement logins.
+        #
+        # So both cases answer identically, and the difference moves into the
+        # mailbox - where only the person who controls the address sees it.
+        # "I never got the email" stays answerable, because the person who
+        # owns that address did get one; it just says they already have an
+        # account.
+        try:
+            _send_mail(
+                to=email,
+                subject="Your OpportunityAI account",
+                body=_already_registered_email(email),
+            )
+        except mailer.MailError as error:
+            raise HTTPException(status_code=503, detail=str(error))
+        return {"status": "sent", "email": email}
 
     temporary = generate_temporary_password()
     account = models_db.Account(
@@ -287,7 +355,28 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db_session)) ->
 
     db.add(account)
     db.commit()
-    return account
+    return {"status": "sent", "email": email}
+
+
+def _already_registered_email(email: str) -> str:
+    """Sent when someone tries to register an address that already has an
+    account. It has to be useful to the real owner - who may have forgotten
+    they signed up - without confirming anything to whoever typed the
+    address in."""
+    return "\n".join([
+        "Someone asked to create an OpportunityAI account with this address.",
+        "",
+        "You already have one, so we have not created another and nothing has",
+        "changed. Sign in as usual:",
+        "",
+        APP_URL,
+        "",
+        "If you have forgotten your password, use the 'Forgot your password?'",
+        "link on that page and we will email you a new one.",
+        "",
+        "If this was not you, you can ignore this message - whoever asked was",
+        "not told whether this address has an account.",
+    ])
 
 
 def generate_temporary_password() -> str:
@@ -347,7 +436,9 @@ def _reset_email(email: str, password: str) -> str:
 
 @app.post("/forgot-password")
 def forgot_password(
-    payload: ForgotPasswordRequest, db: Session = Depends(get_db_session)
+    payload: ForgotPasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db_session),
 ) -> dict[str, str]:
     """Email a fresh temporary password to an account that has lost its own.
 
@@ -357,16 +448,20 @@ def forgot_password(
     password that exists nowhere - strictly worse than the state they were
     already in.
 
-    This reports whether the address is registered, which is a leak. It is the
-    same trade `register` already documents and makes deliberately: /register
-    answers the same question to anyone who asks, so refusing to answer it
-    here would be theatre, while "I never got the email" would become
-    unanswerable for a real user.
+    Answers the same way whether or not the address is registered. It used to
+    answer 404 for an unknown one, on the reasoning that /register leaked the
+    same fact anyway so hiding it here would be theatre. /register no longer
+    leaks it, so neither does this.
     """
     email = payload.email.strip().lower()
+
+    _check_mail_throttle(request, email)
+
     account = db.query(models_db.Account).filter_by(email=email).first()
     if account is None:
-        raise HTTPException(status_code=404, detail="no account with this email address")
+        # Nothing to send and nothing to say. The wait above is what stops
+        # this being a way to time the difference.
+        return {"status": "sent", "email": email}
 
     temporary = generate_temporary_password()
     new_hash = auth_module.hash_password(temporary)
@@ -388,10 +483,66 @@ def forgot_password(
     return {"status": "sent", "email": email}
 
 
+def _too_many(seconds: int) -> HTTPException:
+    """One shape for every refusal that is about rate, not about credentials.
+
+    429 with Retry-After, so a browser, a script and a person all get the same
+    answer in a form each of them understands.
+    """
+    minutes = max(1, round(seconds / 60))
+    return HTTPException(
+        status_code=429,
+        detail=(
+            f"too many attempts - wait about {minutes} minute"
+            f"{'s' if minutes != 1 else ''} and try again"
+        ),
+        headers={"Retry-After": str(seconds)},
+    )
+
+
+def _check_mail_throttle(request: Request, email: str) -> None:
+    """Refuse to keep emailing the same address, or to let one caller keep
+    asking us to email strangers. Applies to registration and password reset
+    alike - both send mail to an address the caller merely typed in."""
+    address = throttle_module.client_address(request)
+    pairs = (
+        (throttle_module.mail_by_recipient, email),
+        (throttle_module.mail_by_sender, address),
+    )
+    for throttle, key in pairs:
+        wait = throttle.retry_after(key)
+        if wait:
+            raise _too_many(wait)
+    # Counted on the way in, not on failure: the thing being limited here is
+    # how much mail this endpoint can be made to send, and a message that was
+    # sent successfully is exactly what we are rationing.
+    for throttle, key in pairs:
+        throttle.record_failure(key)
+
+
 @app.post("/login", response_model=AccountOut)
-def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db_session)) -> models_db.Account:
-    account = db.query(models_db.Account).filter_by(email=payload.email.strip().lower()).first()
+def login(
+    payload: LoginRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db_session),
+) -> models_db.Account:
+    email = payload.email.strip().lower()
+    address = throttle_module.client_address(request)
+    account_key, address_key = f"account:{email}", f"addr:{address}"
+
+    # Checked before the password is even looked at, so a locked-out key costs
+    # an attacker a round trip and costs this server no bcrypt.
+    for throttle, key in ((throttle_module.sign_in_by_account, account_key),
+                          (throttle_module.sign_in_by_address, address_key)):
+        wait = throttle.retry_after(key)
+        if wait:
+            raise _too_many(wait)
+
+    account = db.query(models_db.Account).filter_by(email=email).first()
     if account is None or not auth_module.verify_password(payload.password, account.password_hash):
+        throttle_module.sign_in_by_account.record_failure(account_key)
+        throttle_module.sign_in_by_address.record_failure(address_key)
         raise HTTPException(status_code=401, detail="invalid email or password")
 
     expiry = account.temp_password_expires_at
@@ -406,6 +557,11 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
                 status_code=401,
                 detail="this temporary password has expired - ask for a new one",
             )
+
+    # Got in. Someone who mistyped twice and then succeeded is not an
+    # attacker and must not meet a lockout a minute later.
+    throttle_module.sign_in_by_account.clear(account_key)
+    throttle_module.sign_in_by_address.clear(address_key)
 
     _set_session_cookie(response, account.id)
     return account

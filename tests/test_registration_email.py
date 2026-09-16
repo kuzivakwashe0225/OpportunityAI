@@ -116,12 +116,18 @@ def test_no_account_is_created_if_the_mail_cannot_be_delivered(monkeypatch):
         assert session.query(models_db.Account).filter_by(email="new@example.com").count() == 0
 
 
-def test_registering_an_existing_address_is_refused(sent):
+def test_registering_an_existing_address_issues_no_second_password(sent):
+    """The answer is now indistinguishable from a successful registration -
+    but what happens underneath must not be. No new password and no
+    overwritten hash: the existing account is untouched, and the mail it
+    triggers says so rather than carrying credentials."""
     _register()
     again = _register()
 
-    assert again.status_code == 409
-    assert len(sent) == 1, "no second password is issued for an existing account"
+    assert again.status_code == 201
+    assert len(sent) == 2, "the address owner is told someone tried"
+    assert "Password:" not in sent[-1]["body"]
+    assert "already have one" in sent[-1]["body"]
 
 
 def test_more_than_one_account_can_now_register(sent):

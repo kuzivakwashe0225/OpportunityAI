@@ -69,3 +69,19 @@ def _password_from(body: str) -> str:
         if line.startswith("Password:"):
             return line.split("Password:", 1)[1].strip()
     raise AssertionError("no password line in the welcome email")
+
+
+@pytest.fixture(autouse=True)
+def reset_throttles():
+    """Forget rate-limit counts between tests.
+
+    The suite registers and signs in hundreds of times from one address. Left
+    to accumulate, the throttles would lock it out partway through and every
+    later test would fail for a reason that has nothing to do with what it
+    tests. Tests that exercise the throttles build their own counts from zero.
+    """
+    from opportunity_agent import throttle as throttle_module
+
+    throttle_module.reset_all()
+    yield
+    throttle_module.reset_all()

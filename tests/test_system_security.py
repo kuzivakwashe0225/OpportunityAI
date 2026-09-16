@@ -450,54 +450,108 @@ def test_a_profile_type_that_does_not_exist_is_refused():
 # system telling you the gap was closed. When one of these is fixed, invert
 # the assertion rather than deleting it.
 
-def test_sign_in_is_not_rate_limited_yet():
-    """GAP: an attacker may guess passwords as fast as they can connect.
+def test_guessing_passwords_stops_being_free():
+    """Was a pinned gap: twelve wrong passwords in 3.7 seconds, no lockout.
 
-    bcrypt's own cost is the only brake - roughly 300ms per attempt per
-    connection - and that is a throttle on one attacker with one socket, not
-    on a hundred parallel ones. Fine while this is the owner's own box;
-    it needs a per-account and per-IP limit before strangers can reach it.
+    Now the door closes, and the answer changes from 401 to 429 carrying a
+    Retry-After the caller can actually read.
     """
     fresh = TestClient(app)
     sign_up(fresh, email="guessme@example.com")
     fresh.cookies.clear()
 
-    codes = {
+    codes = [
         fresh.post("/login", json={"email": "guessme@example.com",
                                    "password": f"guess-{n}"}).status_code
         for n in range(12)
-    }
+    ]
 
-    assert codes == {401}, "something already throttles this - update the report"
+    assert codes[0] == 401, "the first wrong password is just wrong"
+    assert 429 in codes, "twelve wrong passwords were all accepted"
+    assert codes[-1] == 429, "and it stays shut"
+
+    locked = fresh.post("/login", json={"email": "guessme@example.com",
+                                        "password": "guess-again"})
+    assert int(locked.headers["Retry-After"]) > 0
 
 
-def test_registering_reveals_whether_an_email_already_has_an_account():
-    """GAP: account enumeration.
+def test_the_lockout_does_not_punish_someone_who_then_remembers():
+    """A person who mistypes twice and then gets it right is not an attacker,
+    and must not meet a lockout a minute later."""
+    fresh = TestClient(app)
+    password = sign_up(fresh, email="fumble@example.com")
+    fresh.cookies.clear()
 
-    409 for a known address and 201 for an unknown one tells a stranger which
-    of a list of emails hold accounts here. The usual fix is to answer
-    identically in both cases and say so in the email instead.
-    """
+    for _ in range(3):
+        fresh.post("/login", json={"email": "fumble@example.com", "password": "nope"})
+    assert fresh.post("/login", json={"email": "fumble@example.com",
+                                      "password": password}).status_code == 200
+
+    fresh.cookies.clear()
+    for _ in range(3):
+        fresh.post("/login", json={"email": "fumble@example.com", "password": "nope"})
+
+    assert fresh.post("/login", json={"email": "fumble@example.com",
+                                      "password": password}).status_code == 200
+
+
+def test_locking_one_account_does_not_lock_everyone_else_out():
+    """The per-address limit is deliberately looser than the per-account one.
+    A campus or an office is one address to us, and one person forgetting
+    their password there must not shut out the rest."""
+    attacker = TestClient(app)
+    sign_up(attacker, email="target@example.com")
+    victim = TestClient(app)
+    bystander_password = sign_up(victim, email="bystander@example.com")
+    attacker.cookies.clear()
+    victim.cookies.clear()
+
+    for n in range(12):
+        attacker.post("/login", json={"email": "target@example.com",
+                                      "password": f"guess-{n}"})
+
+    assert victim.post("/login", json={"email": "bystander@example.com",
+                                       "password": bystander_password}).status_code == 200
+
+
+def test_registering_gives_nothing_away_about_who_already_has_an_account():
+    """Was a pinned gap: 409 for a known address, 201 for an unknown one, so
+    anyone could test a list of emails against a system holding tax
+    certificates and procurement logins."""
     fresh = TestClient(app)
     sign_up(fresh, email="taken@example.com")
 
     known = fresh.post("/register", json={"email": "taken@example.com"})
     unknown = fresh.post("/register", json={"email": "free@example.com"})
 
-    assert known.status_code == 409
-    assert unknown.status_code == 201
+    assert known.status_code == unknown.status_code == 201
+    assert known.json() == {"status": "sent", "email": "taken@example.com"}
+    assert unknown.json() == {"status": "sent", "email": "free@example.com"}
 
 
-def test_password_reset_also_reveals_whether_an_account_exists():
-    """GAP: the same enumeration, on the endpoint that needs no session."""
+def test_password_reset_gives_nothing_away_either():
+    """The same enumeration on the endpoint that needs no session."""
     fresh = TestClient(app)
     sign_up(fresh, email="resetme@example.com")
 
     known = fresh.post("/forgot-password", json={"email": "resetme@example.com"})
     unknown = fresh.post("/forgot-password", json={"email": "nobody@example.com"})
 
-    assert known.status_code == 200
-    assert unknown.status_code == 404
+    assert known.status_code == unknown.status_code == 200
+    assert known.json()["status"] == unknown.json()["status"] == "sent"
+
+
+def test_mailing_the_same_address_over_and_over_is_refused():
+    """Otherwise this endpoint is a way to have us post mail to a stranger
+    repeatedly, at the cost of our own sending reputation."""
+    fresh = TestClient(app)
+
+    codes = [
+        fresh.post("/forgot-password", json={"email": "pester@example.com"}).status_code
+        for _ in range(8)
+    ]
+
+    assert 429 in codes
 
 
 def test_the_session_cookie_is_only_marked_secure_when_told_to():
@@ -534,3 +588,49 @@ def test_every_rendered_value_in_the_page_goes_through_the_escaper():
     ]
 
     assert offenders == [], offenders
+
+
+# --------------------------------------------------------------------------
+# Headers every response carries
+# --------------------------------------------------------------------------
+
+def test_uploaded_documents_cannot_be_reinterpreted_as_pages():
+    """Without nosniff, a browser may decide a document the owner uploaded is
+    really HTML and run it - on our origin, with the session cookie
+    attached."""
+    assert client.get("/ui").headers["X-Content-Type-Options"] == "nosniff"
+
+
+def test_the_app_cannot_be_framed_and_clicked_through():
+    assert client.get("/ui").headers["X-Frame-Options"] == "DENY"
+
+
+def test_the_page_someone_came_from_does_not_travel_to_the_sites_they_open():
+    """Every opportunity is a link out to somebody else's site."""
+    assert client.get("/ui").headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+
+
+def test_nothing_here_may_ask_for_a_camera_or_a_location():
+    policy = client.get("/ui").headers["Permissions-Policy"]
+
+    assert "camera=()" in policy
+    assert "geolocation=()" in policy
+
+
+def test_hsts_is_off_unless_the_deployment_turns_it_on(monkeypatch):
+    """Sending HSTS from a deployment that cannot do HTTPS bricks that
+    hostname in every browser that saw it, for the length of the max-age. So
+    it is opt-in, set alongside TLS rather than shipped on by default."""
+    from opportunity_agent import api as api_module
+
+    assert api_module.HSTS_ENABLED is False
+    assert "Strict-Transport-Security" not in client.get("/ui").headers
+
+
+def test_the_headers_are_on_api_answers_too_not_just_the_page():
+    """Middleware, not a decorator on one route - so a route added tomorrow
+    is covered without anyone remembering to cover it."""
+    headers = client.get("/health").headers
+
+    assert headers["X-Content-Type-Options"] == "nosniff"
+    assert headers["X-Frame-Options"] == "DENY"

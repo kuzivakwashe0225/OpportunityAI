@@ -2,10 +2,27 @@ services:
   api:
     restart: unless-stopped
     build: .
-    command: python -m uvicorn opportunity_agent.api:app --host 0.0.0.0 --port 8000
+    command: python -m uvicorn opportunity_agent.api:app --host 0.0.0.0 --port 8000 --forwarded-allow-ips '*'
     ports:
-      - "8000:8000"
+      # Bound to the loopback, not 0.0.0.0. Caddy terminates TLS on
+      # opportunityai.meshcloud.co.zw and proxies here; leaving this open to
+      # the internet meant every visitor could reach the app over plain HTTP
+      # and hand their session cookie to anyone on the path.
+      #
+      # It is also what makes the rate limiter's view of the caller honest:
+      # X-Forwarded-For is forgeable by whoever can talk to the app directly,
+      # and after this change nobody can. throttle.client_address() depends on
+      # that - changing either one alone breaks it.
+      - "127.0.0.1:8000:8000"
     environment:
+      # Set now that Caddy terminates TLS in front. Without it the session
+      # cookie is sent over plain HTTP too, which is the hole this pair
+      # closes.
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-1}
+      # Tells browsers never to try this host over HTTP again. Deliberately
+      # separate from the flag above: this one is hard to undo, so a
+      # deployment without TLS must be able to leave it off.
+      HSTS_ENABLED: ${HSTS_ENABLED:-1}
       DATABASE_URL: postgresql+psycopg://opportunity:opportunity@db:5432/opportunity_agent
       OPPORTUNITY_AGENT_STORE_PATH: /data/store.json
       # SearXNG (below) is the primary search backend - self-hosted, no

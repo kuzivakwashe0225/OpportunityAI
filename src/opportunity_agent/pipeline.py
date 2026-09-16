@@ -38,7 +38,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from . import compliance, egp, egp_awards, models_db, profile_schema
+from . import compliance, egp, egp_awards, models_db, profile_schema, relevance
 from .connector import fetch_public_page
 from .discovery import build_search_queries, canonicalize_url, discover
 from .drafting import build_application_package
@@ -322,6 +322,9 @@ def run_profile_cycle(
     # the gap between the two is exactly the signal the failures list exists
     # to explain, and collapsing them hides a source going bad.
     candidates: list[tuple[Opportunity, egp.TenderDetails | None]] = []
+    # What the gates threw away, so the owner sees it in the run record.
+    # Silent filtering is how a discovery outage goes unnoticed for a week.
+    skipped: list[str] = []
     if is_tender:
         try:
             candidates = list(tender_fn())
@@ -354,13 +357,32 @@ def run_profile_cycle(
                                found=0, added=0, drafted=0, failures=[f"search: {error}"])
         found = len(results)
         for result in results:
+            # Gate one, on the URL alone. Cheapest possible rejection: a
+            # consent screen or a Wikipedia article is not worth a request,
+            # and on a slow upstream that request is most of the cycle.
+            reason = relevance.junk_url_reason(result.url)
+            if reason:
+                skipped.append(reason)
+                continue
             try:
                 page = fetch_fn(result.url)
-                candidates.append(
-                    (page_to_opportunity(page, title=result.title or "Untitled opportunity"), None)
-                )
             except Exception as error:
                 failures.append(f"{result.url}: {error}")
+                continue
+
+            # Gate two, on what the page actually says. A search engine will
+            # hand back a retailer's front page for "grant"; only reading it
+            # settles that. Generous by design - see relevance.py - so a page
+            # has to be both readable and entirely silent about applying to
+            # be dropped here.
+            page_text = getattr(page, "content", "") or ""
+            if not relevance.reads_like_an_opportunity(page_text, result.title or ""):
+                skipped.append("the page never mentions applying for anything")
+                continue
+
+            candidates.append(
+                (page_to_opportunity(page, title=result.title or "Untitled opportunity"), None)
+            )
 
     # ---- store, match, draft ---------------------------------------------
     known_urls = {
@@ -415,6 +437,10 @@ def run_profile_cycle(
         else:
             stored.stage = "drafted"
             drafted += 1
+
+    summary = relevance.summarise_skipped(skipped)
+    if summary:
+        failures.append(summary)
 
     _notify(session, profile, drafted, awaiting_documents)
 
