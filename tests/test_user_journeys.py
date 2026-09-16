@@ -320,9 +320,15 @@ def test_a_brand_new_account_is_not_shown_a_broken_dashboard():
     assert newcomer.get(f"/profiles/{profile['id']}/opportunities").json() == []
 
 
-def test_running_the_agent_before_answering_anything_says_what_is_missing():
+def test_running_the_agent_before_answering_anything_says_what_is_missing(monkeypatch):
     """Rather than searching for nothing and reporting zero results, which
-    would read as "there are no opportunities for you"."""
+    would read as "there are no opportunities for you".
+
+    The search backend is configured explicitly here. Without it the endpoint
+    answers 503 first - a correct answer to a different question, and one this
+    test would otherwise pass or fail depending on whose machine it ran on.
+    """
+    monkeypatch.setenv("TAVILY_API_KEY", "test-key")
     newcomer = TestClient(api.app)
     sign_up(newcomer, email="empty@example.com")
     profile = newcomer.post("/profiles", json={
