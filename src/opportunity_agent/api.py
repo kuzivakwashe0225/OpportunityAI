@@ -1168,6 +1168,37 @@ def run_profile_pipeline(
     }
 
 
+# Payload keys holding the full text of a fetched page. They are the reason
+# drafting works at all - and they are the reason one profile's list response
+# measured 66 MB on the live server, 78% of it call text, which is nine
+# minutes on a 1 Mbps mobile connection before a single card appears.
+#
+# The list is a list. The text belongs to the detail page, which asks for one
+# opportunity and gets `call_text` capped at 20,000 characters.
+_BULK_PAYLOAD_KEYS = ("evidence", "content", "page_text")
+
+
+def _slim_for_list(opportunity: models_db.StoredOpportunity) -> OpportunityOut:
+    """One row of the list: everything the cards draw, none of the bulk.
+
+    Checked against the front end rather than guessed - oppCard() reads title,
+    url, source, deadline and the match reasons, and renderPackage() reads
+    checklist, cover_note and warnings. Neither ever touches `evidence` or the
+    drafted section bodies, so neither is sent.
+    """
+    row = OpportunityOut.model_validate(opportunity)
+    row.payload = {
+        key: value for key, value in (opportunity.payload or {}).items()
+        if key not in _BULK_PAYLOAD_KEYS
+    }
+    if row.package:
+        sections = row.package.get("sections") or []
+        row.package = {k: v for k, v in row.package.items() if k != "sections"}
+        # The count, not the prose: enough for the card to say a draft exists.
+        row.package["section_count"] = len(sections)
+    return row
+
+
 @app.get("/profiles/{profile_id}/opportunities", response_model=list[OpportunityOut])
 def list_profile_opportunities(
     profile_id: str,
@@ -1191,7 +1222,8 @@ def list_profile_opportunities(
         query = query.filter_by(stage=stage)
     if match_status:
         query = query.filter_by(match_status=match_status)
-    return query.order_by(models_db.StoredOpportunity.created_at.desc()).all()
+    rows = query.order_by(models_db.StoredOpportunity.created_at.desc()).all()
+    return [_slim_for_list(row) for row in rows]
 
 
 @app.get("/profiles/{profile_id}/opportunities/{opportunity_id}", response_model=OpportunityOut)
