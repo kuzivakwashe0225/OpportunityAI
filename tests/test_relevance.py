@@ -115,6 +115,45 @@ def test_a_retailer_that_never_mentions_applying_is_refused():
     assert not relevance.reads_like_an_opportunity(SHOP, "Electro Depot")
 
 
+@pytest.mark.parametrize("text,title", [
+    ("Refrigerators and washing machines. Browse our programme of offers. " * 8,
+     "Electro Depot"),
+    ("Purr-fect gaming awaits. Claim your welcome award today. " * 8,
+     "Meowzino Casino"),
+    ("Baby silicone set. See more results for this position in our store. " * 8,
+     "Amazon.de"),
+    ("How to fix failed to decode packet errors. Submit a support ticket. " * 8,
+     "Minecraft forum"),
+])
+def test_one_ordinary_commercial_word_is_not_enough(text, title):
+    """The first version of this rule used one flat list and a single hit, and
+    every one of these sailed through it - each says "programme" or "award" or
+    "position" or "submit" somewhere in its chrome. Checked against the live
+    database, tightening it caught 25 more pages like these and not one real
+    call."""
+    assert not relevance.reads_like_an_opportunity(text, title)
+
+
+def test_two_different_ordinary_words_are_enough():
+    """A real listing that happens to avoid the obvious vocabulary still gets
+    through on the weaker evidence - which is why the bar is two, not one."""
+    text = ("We are recruiting for this position. Candidates should submit "
+            "their details to the panel. " * 8)
+
+    assert relevance.reads_like_an_opportunity(text, "Opening at the ministry")
+
+
+@pytest.mark.parametrize("word", [
+    "deadline", "closing date", "scholarship", "how to apply", "eligibility",
+    "bursary", "fellowship", "tender", "vacancies", "internship",
+])
+def test_one_unambiguous_word_is_always_enough(word):
+    """These belong to a call and to almost nothing else."""
+    text = f"Something something {word} something. " * 12
+
+    assert relevance.reads_like_an_opportunity(text, "A page")
+
+
 def test_a_page_too_short_to_judge_is_kept():
     """Pages behind a 403 land here. One of them might be the tender of the
     year, and a wrongly-dropped opportunity is worse than a wrongly-kept

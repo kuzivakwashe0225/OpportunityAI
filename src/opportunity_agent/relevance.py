@@ -69,17 +69,42 @@ _JUNK_PATH_SEGMENTS = {
     "basket", "unsubscribe", "logout",
 }
 
-# The vocabulary of a call for applications, across the kinds this system
-# looks for. One hit is enough - the test is "does this page talk about
-# applying at all", not "is this a good match", which is the eligibility
-# matcher's job and happens later with far more context.
-_OPPORTUNITY_WORDS = (
-    "apply", "application", "applicant", "deadline", "closing date", "close on",
-    "eligib", "eligibility", "scholarship", "bursary", "fellowship", "grant",
-    "funding", "tender", "bid", "procurement", "proposal", "call for",
-    "vacancy", "vacancies", "job opening", "recruit", "hiring", "position",
-    "submit", "submission", "award", "stipend", "internship", "programme",
-    "program", "candidates", "qualification",
+# The vocabulary of a call for applications, in two strengths.
+#
+# The split exists because the first version of this used one flat list and a
+# single hit, and a French appliance retailer, an Amazon search page, a casino
+# and a Minecraft support forum all sailed through it - every one of them says
+# "program" or "position" or "award" somewhere in its chrome. Measured against
+# the live database, the rule below catches 25 more of those, and checked line
+# by line there was not one real call among them.
+#
+# STRONG words belong to a call and to almost nothing else. One is enough.
+_STRONG_WORDS = (
+    "apply now", "how to apply", "application", "applicant", "deadline",
+    "closing date", "eligibility", "eligible", "call for", "scholarship",
+    "bursary", "fellowship", "grant", "tender", "request for quotation",
+    "request for proposal", "vacancy", "vacancies", "job opening",
+    "internship", "stipend", "funding opportunity",
+)
+
+# WEAK words turn up on ordinary commercial pages too. One alone means
+# nothing; two different ones start to mean something.
+#
+# Grouped rather than listed flat, because spelling variants of one word are
+# not two pieces of evidence. A first attempt at this counted matching
+# strings, and "programme" scored twice by also containing "program" - which
+# let a retailer's "browse our programme of offers" through as though it had
+# said two separate things.
+_WEAK_WORD_GROUPS = (
+    ("apply",),
+    ("submit",),
+    ("award",),
+    ("programme", "program"),
+    ("position",),
+    ("candidates",),
+    ("qualification",),
+    ("recruit", "hiring"),
+    ("funding",),
 )
 
 # Below this there is not enough text to judge, so nothing is judged. Pages
@@ -132,15 +157,21 @@ def junk_url_reason(url: str) -> str | None:
 def reads_like_an_opportunity(text: str, title: str = "") -> bool:
     """Whether the fetched page talks about applying for anything at all.
 
-    Deliberately generous. It asks for one word out of thirty-odd, from a
-    vocabulary spanning scholarships, tenders, grants and jobs, and it gives
-    the benefit of the doubt to anything too short to assess. A page has to be
-    both readable and entirely silent about applications to fail this.
+    Still generous, but no longer naive. One unambiguous word - "deadline",
+    "scholarship", "how to apply" - is enough on its own. Failing that, two
+    different weaker ones are needed, because "program" or "award" alone is
+    something every commercial page in the world says somewhere in its
+    chrome. Anything too short to assess gets the benefit of the doubt.
     """
     body = f"{title}\n{text}".lower()
     if len(text.strip()) < _MIN_TEXT_TO_JUDGE:
         return True
-    return any(word in body for word in _OPPORTUNITY_WORDS)
+    if any(word in body for word in _STRONG_WORDS):
+        return True
+    distinct = sum(
+        1 for group in _WEAK_WORD_GROUPS if any(word in body for word in group)
+    )
+    return distinct >= 2
 
 
 def summarise_skipped(reasons: list[str]) -> str | None:
