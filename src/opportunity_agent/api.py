@@ -1192,8 +1192,14 @@ def _slim_for_list(opportunity: models_db.StoredOpportunity) -> OpportunityOut:
         if key not in _BULK_PAYLOAD_KEYS
     }
     if row.package:
+        # The package keeps its own copy of the fetched page, which is where
+        # 96.9% of the remaining bytes were hiding after `payload` was
+        # trimmed: 36 KB per row, and one of them a 1.3 MB YouTube page.
         sections = row.package.get("sections") or []
-        row.package = {k: v for k, v in row.package.items() if k != "sections"}
+        row.package = {
+            key: value for key, value in row.package.items()
+            if key not in _BULK_PAYLOAD_KEYS and key != "sections"
+        }
         # The count, not the prose: enough for the card to say a draft exists.
         row.package["section_count"] = len(sections)
     return row

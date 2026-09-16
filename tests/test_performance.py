@@ -83,9 +83,14 @@ def _profile_with(count, *, with_packages=False):
             match_status="eligible" if index % 3 else "needs_review",
             match_score=index % 20,
             match_reasons={"matched": ["category GE001"]},
-            package=({"status": "ready", "sections": [
-                {"title": "Technical Proposal", "body": "We will supply..." * 50}
-            ]} if with_packages else None),
+            # Shaped like the packages actually in the live database: they
+            # keep their own copy of the fetched page alongside the draft.
+            package=({"status": "ready", "cover_note": "Dear Sir or Madam...",
+                      "checklist": [{"requirement": "tax_clearance", "status": "met"}],
+                      "evidence": [CALL_TEXT],
+                      "sections": [
+                          {"title": "Technical Proposal", "body": "We will supply..." * 50}
+                      ]} if with_packages else None),
         ))
     session.commit()
     session.close()
@@ -156,7 +161,7 @@ def test_the_opportunity_list_does_not_ship_the_whole_call_text_to_the_browser()
     must not be multiplied by 265 and sent to a phone. The list is a list; the
     text belongs on the detail page, which asks for one.
     """
-    profile = _profile_with(REALISTIC_OPPORTUNITY_COUNT)
+    profile = _profile_with(REALISTIC_OPPORTUNITY_COUNT, with_packages=True)
 
     body = client.get(f"/profiles/{profile['id']}/opportunities").content
 
