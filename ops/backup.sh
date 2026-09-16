@@ -63,15 +63,19 @@ mv "$doc_file.part" "$doc_file"
 echo "documents: $(du -h "$doc_file" | cut -f1)"
 
 # --- a backup nobody checks is not a backup -------------------------------
-# Verify the dump is readable before old ones are deleted. pg_restore -l reads
-# the table of contents without touching the database, so a corrupt or
-# truncated file fails here rather than on the day it is needed.
-if docker compose exec -T db pg_restore -l "/dev/stdin" < "$db_file" > /dev/null 2>&1; then
-    echo "verified: the dump's table of contents reads back"
-else
-    echo "WARNING: the dump could not be read back - keeping every old backup"
+# Verify before deleting anything. pg_restore -l reads the table of contents
+# without touching the database, so a truncated or corrupt file fails here
+# rather than on the day it is needed.
+#
+# It counts tables rather than just checking the command succeeded: an empty
+# dump is perfectly readable, and "the backup ran fine" for a file containing
+# no rows is the most expensive kind of green tick.
+tables="$(docker compose exec -T db pg_restore -l < "$db_file" 2>/dev/null | grep -c 'TABLE DATA' || true)"
+if [ "${tables:-0}" -lt 1 ]; then
+    echo "WARNING: the dump lists no table data - keeping every old backup"
     exit 1
 fi
+echo "verified: the dump lists $tables tables"
 
 # --- rotate ---------------------------------------------------------------
 find "$DEST" -name 'db-*.dump' -mtime "+$KEEP_DB_DAYS" -delete
