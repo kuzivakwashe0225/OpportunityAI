@@ -118,8 +118,17 @@ services:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-opportunity}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-opportunity-secret}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      # Loopback only. This bucket holds people's tax clearance certificates,
+      # CVs and national IDs, and nothing outside the box has any business
+      # reaching it: the API talks to it over the compose network as
+      # minio:9000, and presigned URLs are never handed to a browser.
+      #
+      # It was open to the internet, which made a MinIO vulnerability or a
+      # leaked key immediately exploitable by anyone rather than by someone
+      # who already had a shell here. Reach the console over an SSH tunnel:
+      #   ssh -L 9001:127.0.0.1:9001 isaiah@161.97.176.218
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - minio-data:/data
 

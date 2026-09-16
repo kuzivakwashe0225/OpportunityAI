@@ -498,6 +498,10 @@
 
   var RETRY_STATUSES = [429, 500, 502, 503, 504];
   var MAX_RETRIES = 3;
+  // Longest Retry-After we will sit and wait through rather than showing the
+  // person. A rate limiter that says "an hour" means the message, not a
+  // spinner.
+  var MAX_HONOURED_WAIT_MS = 10000;
 
   function record(entry){
     entry.at = Date.now();
@@ -541,6 +545,11 @@
       try{ detail=(await response.json()).detail||""; }catch(e){}
       var err = new Error(detail || ("Request to "+path+" failed"));
       err.status = response.status;
+      // The server says how long to wait when it throttles us. Retrying
+      // sooner than that just spends the allowance again and keeps the door
+      // shut for longer.
+      var retryAfter = response.headers.get("Retry-After");
+      if(retryAfter) err.retryAfterMs = Number(retryAfter) * 1000;
       throw err;
     }
     if(response.status===204) return null;
@@ -572,9 +581,17 @@
         }catch(err){
           var retriable = method==="GET" &&
             (err.isNetwork || RETRY_STATUSES.indexOf(err.status)!==-1);
+          // A wait the server asked for is honoured, but only when it is
+          // short enough to be worth holding a page open for. "Come back in
+          // an hour" is an answer to show the person, not to sleep on.
+          if(err.retryAfterMs && err.retryAfterMs > MAX_HONOURED_WAIT_MS){
+            record({path:path, method:method, status:err.status,
+                    ms:Date.now()-started, retries:attempt, error:err.message});
+            throw err;
+          }
           if(retriable && attempt < MAX_RETRIES){
             attempt++;
-            await sleep(backoffDelay(attempt));
+            await sleep(err.retryAfterMs || backoffDelay(attempt));
             continue;
           }
           record({path:path, method:method, status:err.status||0,
