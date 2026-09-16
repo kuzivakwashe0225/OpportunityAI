@@ -30,6 +30,34 @@ MAX_REDIRECTS = 4
 # disguising the client to get around it.
 USER_AGENT = "OpportunityAI/0.1 (+https://opportunityai.meshcloud.co.zw)"
 
+# What we ask for, alongside who we are. These are content negotiation, not
+# disguise: they say which formats and language this reader wants, exactly as
+# a browser would, while the User-Agent above still says plainly what we are.
+#
+# The distinction matters and is the project's, not mine. SOLUTION_DEFINITION
+# §8 rules out dressing the client up as a browser to get past a refusal, and
+# a site that says no to an honest agent is saying no. Sending an Accept
+# header is not saying no to that; claiming to be Chrome would be.
+#
+# Measured against seven sites currently refusing us, these headers recover
+# one. The other six serve a JavaScript challenge rather than a page, and no
+# header fixes that - it needs a real browser engine, which this project has
+# deliberately not built.
+#
+# Accept-Encoding omits br: httpx only decodes brotli when its extra is
+# installed, and advertising what we cannot read turns a working fetch into an
+# unreadable one.
+DEFAULT_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "application/pdf;q=0.9,*/*;q=0.8"
+    ),
+    "Accept-Language": "en-GB,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate",
+    "Upgrade-Insecure-Requests": "1",
+}
+
 _DOCX_CONTENT_TYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
@@ -240,7 +268,7 @@ def fetch_public_page(
         raise ValueError("public source client must not follow redirects")
     try:
         for _hop in range(max_redirects + 1):
-            with http_client.stream("GET", target, headers={"User-Agent": USER_AGENT}) as response:
+            with http_client.stream("GET", target, headers=DEFAULT_HEADERS) as response:
                 if response.is_redirect:
                     location = response.headers.get("location")
                     if not location:

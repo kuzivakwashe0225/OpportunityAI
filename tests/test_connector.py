@@ -216,3 +216,40 @@ def test_html_is_stored_as_its_words_not_its_markup():
     assert "Closes 3 October 2026." in page.content
     assert "track()" not in page.content
     assert "<h1>" not in page.content
+
+
+def test_fetch_asks_for_what_a_reader_would_without_pretending_to_be_one():
+    """Content negotiation is not disguise.
+
+    The headers below say which formats and language this reader wants, the
+    way any client does. The User-Agent above still says plainly what we are -
+    SOLUTION_DEFINITION §8 rules out dressing the client up as a browser to
+    get past a refusal, and this test is what keeps the two apart.
+
+    Measured on seven sites refusing us, these recover one. The rest serve a
+    JavaScript challenge, which is a headless browser's problem, not a
+    header's.
+    """
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(request.headers)
+        return httpx.Response(200, text="ok")
+
+    fetch_public_page(
+        "https://example.org/x",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    assert "text/html" in captured["accept"]
+    assert captured["accept-language"].startswith("en")
+    assert "Mozilla" not in captured["user-agent"]
+    assert "OpportunityAI" in captured["user-agent"]
+
+
+def test_we_never_advertise_an_encoding_we_cannot_read():
+    """Brotli needs an httpx extra that is not installed. Advertising it turns
+    a working fetch into an unreadable one."""
+    from opportunity_agent.connector import DEFAULT_HEADERS
+
+    assert "br" not in DEFAULT_HEADERS["Accept-Encoding"]
