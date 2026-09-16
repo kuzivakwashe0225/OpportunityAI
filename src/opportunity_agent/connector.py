@@ -89,43 +89,81 @@ _BLOCK_TAGS = {
 }
 
 
+# Site furniture. Not the call, on any page, ever - and expensive to keep: a
+# university scholarship page led with 90 lines of "Academics | Admissions |
+# Campus Life | Alumni | Athletics", which is what a model reading the call
+# would have spent its context window on.
+_CHROME_TAGS = {"nav", "aside"}
+
+# What a page declares to be its own content. When one of these is present it
+# beats any heuristic we could write, because the page's author said so.
+_MAIN_TAGS = {"main", "article"}
+
+# Below this, a <main> is a wrapper rather than the content - a shell that a
+# script fills in later, say - and the whole body is the better answer.
+_MIN_MAIN_CHARS = 400
+
+
 class _TextExtractor(HTMLParser):
     """Readable text out of a page, using the stdlib parser egp.py already uses.
 
     Deliberately not BeautifulSoup: this project has stayed dependency-light
     and this is a few dozen lines of the standard library doing a job that
     does not need a full DOM.
+
+    Collects two versions at once - everything, and just what sat inside
+    <main>/<article> - and `text()` picks. Doing it in one pass keeps this a
+    parser rather than a document model.
     """
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self._parts: list[str] = []
+        self._main_parts: list[str] = []
         self._suppress_depth = 0
+        self._main_depth = 0
+
+    def _emit(self, chunk: str) -> None:
+        self._parts.append(chunk)
+        if self._main_depth:
+            self._main_parts.append(chunk)
 
     def handle_starttag(self, tag, attrs):
-        if tag in _NON_TEXT_TAGS:
+        if tag in _MAIN_TAGS:
+            self._main_depth += 1
+        if tag in _NON_TEXT_TAGS or tag in _CHROME_TAGS:
             self._suppress_depth += 1
         elif tag in _BLOCK_TAGS:
-            self._parts.append("\n")
+            self._emit("\n")
 
     def handle_endtag(self, tag):
-        if tag in _NON_TEXT_TAGS and self._suppress_depth:
-            self._suppress_depth -= 1
+        if tag in _NON_TEXT_TAGS or tag in _CHROME_TAGS:
+            if self._suppress_depth:
+                self._suppress_depth -= 1
         elif tag in _BLOCK_TAGS:
-            self._parts.append("\n")
+            self._emit("\n")
+        if tag in _MAIN_TAGS and self._main_depth:
+            self._main_depth -= 1
 
     def handle_data(self, data):
         if self._suppress_depth:
             return
-        self._parts.append(data)
+        self._emit(data)
 
-    def text(self) -> str:
-        joined = "".join(self._parts)
+    @staticmethod
+    def _clean(parts: list[str]) -> str:
+        joined = "".join(parts)
         # Collapse runs of spaces/tabs, then runs of blank lines, so the result
         # reads like prose rather than a column of whitespace.
         joined = re.sub(r"[ \t\r\f\v]+", " ", joined)
         lines = [line.strip() for line in joined.split("\n")]
         return "\n".join(line for line in lines if line)
+
+    def text(self) -> str:
+        main = self._clean(self._main_parts)
+        if len(main) >= _MIN_MAIN_CHARS:
+            return main
+        return self._clean(self._parts)
 
 
 def html_to_text(html: str) -> str:

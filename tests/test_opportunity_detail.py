@@ -78,6 +78,40 @@ def test_headings_do_not_run_into_the_sentence_after_them():
     assert "Call for Research Proposals\n" in html_to_text(PAGE)
 
 
+NAV = "<nav>" + " ".join(["Academics", "Admissions", "Campus Life", "Athletics"] * 10) + "</nav>"
+BODY = "Applicants must hold a first degree in a relevant field. " * 12
+
+
+def test_the_site_menu_is_not_the_call():
+    """What the first fix still got wrong.
+
+    Extraction worked, and then a university scholarship page led with ninety
+    lines of "Academics | Admissions | Campus Life | Alumni | Athletics".
+    application_spec trims a call to 18,000 characters before reading it, from
+    the head and the tail, so the menu was being read *instead of* the call.
+    """
+    page = ("<html><body>" + NAV + "<main><h1>Scholarship</h1><p>" + BODY +
+            "Closes 3 October 2026.</p></main></body></html>")
+
+    text = html_to_text(page)
+
+    assert "Academics" not in text
+    assert text.startswith("Scholarship")
+    assert "3 October 2026" in text
+
+
+def test_a_main_that_is_only_a_shell_falls_back_to_the_whole_page():
+    """Plenty of pages wrap an empty <div id=app> in <main> and fill it with
+    script. Trusting that blindly would turn a readable page into nothing."""
+    page = ("<html><body>" + NAV + "<main><div id='app'></div></main><p>" + BODY +
+            "</p></body></html>")
+
+    text = html_to_text(page)
+
+    assert "first degree" in text
+    assert "Academics" not in text
+
+
 def test_text_that_is_not_html_is_returned_unchanged():
     plain = "Proposals must not exceed 3.5 pages."
 
