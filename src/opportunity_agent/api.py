@@ -23,7 +23,7 @@ from . import documents as documents_module
 from . import models_db
 from . import pipeline as pipeline_module
 from . import profile_schema
-from .connector import fetch_public_page
+from .connector import fetch_public_page, html_to_text
 from .document_text import extract_text
 from . import egp_session
 from . import application_spec as application_spec_module
@@ -1386,12 +1386,33 @@ def _page_text_for(opportunity: models_db.StoredOpportunity) -> str:
     Prefers the fetched page content the opportunity was built from; falls
     back to whatever summary was stored. Reading the real page matters here -
     the format rules and section list are usually in the body, not the blurb.
+
+    `evidence` is the important one and was the bug: extraction.py stores the
+    fetched page as `evidence=[content]`, and nothing here looked there. So
+    this returned a bare title for essentially every opportunity in the
+    database, the requirement extractor found no sections in it, and drafting
+    fell back to the generic cover letter every single time. Measured on live
+    data before the fix: 399 of 400 opportunities had no readable text by the
+    keys below, while 307 of them held over 5k characters in `evidence`.
     """
     payload = opportunity.payload or {}
     for key in ("content", "page_text", "summary", "description"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             return value
+
+    evidence = payload.get("evidence")
+    if isinstance(evidence, list):
+        joined = "\n\n".join(e for e in evidence if isinstance(e, str) and e.strip())
+        if joined.strip():
+            # Older rows were stored before connector.py extracted text from
+            # HTML, so they still hold raw markup. Cleaning on read means the
+            # 400 opportunities already in the database become usable without
+            # re-fetching every one of them from its original site.
+            if "<" in joined and ">" in joined:
+                joined = html_to_text(joined)
+            return joined
+
     return str(payload.get("title") or "")
 
 
@@ -1574,6 +1595,131 @@ def download_application_document(
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+class RequiredDocumentOut(BaseModel):
+    key: str
+    label: str
+    held: bool
+    # Whether this call asked for it, or whether it is part of the standing
+    # compliance pack for this profile type. Different urgency, different
+    # wording on screen.
+    demanded_by_call: bool = False
+    # The uploaded file satisfying this, when there is one, so the owner sees
+    # *which* of their documents is being counted rather than a bare tick.
+    document_id: str | None = None
+    filename: str | None = None
+
+
+class PrefillFieldOut(BaseModel):
+    key: str
+    label: str
+    value: str
+
+
+@app.get("/profiles/{profile_id}/opportunities/{opportunity_id}/requirements")
+def opportunity_requirements(
+    profile_id: str,
+    opportunity_id: str,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    """Everything the detail page needs, in one request.
+
+    The call in its own words, what it demands, which of those demands the
+    owner's already-uploaded documents satisfy, and the values that can be
+    filled in on a form on their behalf.
+
+    One endpoint rather than four because it is one screen answering one
+    question - "can I apply for this, and what is missing?" - and a page that
+    fired four requests would show four loading states for it.
+    """
+    profile = _get_owned_profile(profile_id, account, db)
+    opportunity = _get_owned_opportunity(profile, opportunity_id, db)
+    payload = opportunity.payload or {}
+    fields = profile.fields or {}
+
+    # --- documents: what is demanded, against what is actually uploaded ---
+    # Two sources of demand, deliberately merged. What this specific call
+    # asked for, and what this profile type always needs (the compliance pack
+    # in profile_schema): a tender that forgets to restate "tax clearance" in
+    # its advert still needs one at submission.
+    from_call = [
+        str(d).strip() for d in (payload.get("required_documents") or []) if str(d).strip()
+    ]
+    demanded = list(from_call)
+    for key in sorted(profile_schema.required_document_keys(profile.profile_type, fields)):
+        if key not in demanded:
+            demanded.append(key)
+
+    # First upload of each kind wins - enough to show the owner the match is
+    # real without listing every duplicate they have ever uploaded.
+    uploaded_by_type: dict[str, models_db.Document] = {}
+    for document in profile.documents:
+        uploaded_by_type.setdefault(document.doc_type or "other", document)
+
+    held = pipeline_module.held_document_keys(profile)
+    documents: list[RequiredDocumentOut] = []
+    for key in demanded:
+        match = uploaded_by_type.get(key)
+        documents.append(RequiredDocumentOut(
+            key=key,
+            label=profile_schema.document_label(profile.profile_type, fields, key),
+            held=key in held,
+            demanded_by_call=key in from_call,
+            document_id=match.id if match else None,
+            filename=match.original_filename if match else None,
+        ))
+
+    # --- what a form could be filled in with, from the profile -------------
+    # Schema-driven, like the onboarding screen: a company gets its
+    # registration and BP numbers, a person gets their study level. Only the
+    # single-value fields, and only ones the owner actually filled in - the
+    # standing rule here is that nothing is invented on their behalf.
+    prefill = [PrefillFieldOut(key="email", label="Email address", value=account.email)]
+    for spec in profile_schema.fields_for(profile.profile_type, fields):
+        if spec.kind not in ("text", "number", "select"):
+            continue
+        value = fields.get(spec.key)
+        if value in (None, "", [], {}):
+            continue
+        prefill.append(PrefillFieldOut(key=spec.key, label=spec.label, value=str(value)))
+
+    package = opportunity.package or {}
+    spec_payload = package.get("spec") or {}
+
+    return {
+        "id": opportunity.id,
+        "title": payload.get("title") or "Untitled opportunity",
+        "url": opportunity.canonical_url,
+        "source": payload.get("source"),
+        "deadline": payload.get("deadline"),
+        "stage": opportunity.stage,
+        "match_status": opportunity.match_status,
+        "match_score": opportunity.match_score,
+        "match_reasons": opportunity.match_reasons or {},
+        "compliance": opportunity.compliance,
+        # The call in its own words. This was empty for essentially every
+        # opportunity until _page_text_for learned to read `evidence`, which
+        # is why drafting produced the same generic letter every time.
+        "call_text": _page_text_for(opportunity)[:20000],
+        "submission": {
+            "document_kind": spec_payload.get("document_kind") or "",
+            "sections": spec_payload.get("sections") or [],
+            "format_rules": spec_payload.get("format_rules") or {},
+            "submit_to": spec_payload.get("submit_to"),
+            "deadline": spec_payload.get("deadline"),
+            "eligibility": spec_payload.get("eligibility") or [],
+        },
+        "required_documents": [d.model_dump() for d in documents],
+        "documents_ready": sum(1 for d in documents if d.held),
+        "documents_total": len(documents),
+        "prefill": [p.model_dump() for p in prefill],
+        "draft": {
+            "status": package.get("status"),
+            "sections": package.get("sections") or [],
+        },
+    }
 
 
 @app.get("/profiles/{profile_id}/summary")

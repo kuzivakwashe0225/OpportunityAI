@@ -258,6 +258,30 @@
   .empty{padding:40px 20px;text-align:center;color:var(--ink-soft);
     font-family:ui-sans-serif,system-ui,sans-serif;}
 
+  /* ---------- opportunity detail ---------- */
+  .crumb{font-family:ui-sans-serif,system-ui,sans-serif;font-size:.85rem;margin:0 0 10px;}
+  .sub{font-size:.95rem;margin:18px 0 8px;}
+  .spec-list{margin:0;padding-left:22px;}
+  .spec-list li{margin:8px 0;}
+  .spec-list span{display:block;font-family:ui-sans-serif,system-ui,sans-serif;
+    font-size:.85rem;color:var(--ink-soft);margin-top:2px;}
+  .spec-rules{margin:0;padding-left:20px;font-family:ui-sans-serif,system-ui,sans-serif;
+    font-size:.88rem;}
+  .spec-rules li{margin:4px 0;}
+  .calltext{white-space:pre-wrap;max-height:460px;overflow:auto;background:var(--bg);
+    padding:14px;border-radius:6px;font-family:ui-sans-serif,system-ui,sans-serif;
+    font-size:.84rem;line-height:1.55;}
+  details summary{cursor:pointer;font-family:ui-sans-serif,system-ui,sans-serif;
+    font-size:.9rem;color:var(--accent);margin-bottom:10px;}
+  .draft-sec{margin-bottom:18px;}
+  .draft-sec .guidance{font-size:.83rem;margin:0 0 6px;}
+  .draft-body{width:100%;font-family:inherit;font-size:.95rem;line-height:1.6;
+    padding:12px;border:1px solid var(--line);border-radius:6px;background:#fff;}
+  .steer{display:block;margin:16px 0 0;font-family:ui-sans-serif,system-ui,sans-serif;
+    font-size:.88rem;}
+  .steer textarea{width:100%;margin-top:6px;padding:10px;border:1px solid var(--line);
+    border-radius:6px;font-family:inherit;font-size:.9rem;}
+
   /* ---------- onboarding ---------- */
   .steps{display:flex;gap:8px;margin-bottom:24px;flex-wrap:wrap;}
   .step{flex:1;min-width:120px;padding:11px 14px;border:1px solid var(--line);border-radius:6px;
@@ -665,21 +689,31 @@
   // ---------------- routing ----------------
   var ROUTES = {dashboard:renderDashboard, review:renderReview, opportunities:renderOpportunities,
                 profile:renderProfile, notifications:renderNotifications, onboarding:renderOnboarding,
-                account:renderAccount, bin:renderBin};
+                account:renderAccount, bin:renderBin, opportunity:renderOpportunityDetail};
 
+  // Routes may now carry one argument: "#/opportunity/<id>". Everything else
+  // keeps its old single-word hash, so no existing link or saved session hash
+  // changes meaning.
   function currentRoute(){
-    var r=(location.hash||"").replace(/^#\//,"");
-    return ROUTES[r] ? r : "dashboard";
+    var name=(location.hash||"").replace(/^#\//,"").split("/")[0];
+    return ROUTES[name] ? name : "dashboard";
+  }
+  function routeParam(){
+    return decodeURIComponent((location.hash||"").replace(/^#\//,"").split("/")[1] || "");
   }
 
   async function renderRoute(){
     var route=currentRoute();
+    // The detail page hangs off the opportunities list, so that tab stays lit
+    // while you are reading one. Losing the highlight makes it feel like you
+    // have left the section rather than gone a level into it.
+    var tab = route==="opportunity" ? "opportunities" : route;
     $all("nav.tabs a").forEach(function(a){
-      a.classList.toggle("active", a.dataset.route===route);
+      a.classList.toggle("active", a.dataset.route===tab);
     });
     if(!state.profiles.length && route!=="onboarding"){ location.hash="#/onboarding"; return; }
     $("#view-root").innerHTML="<p class='empty'>Loading…</p>";
-    try { await ROUTES[route](); wireCoach(); }
+    try { await ROUTES[route](routeParam()); wireCoach(); }
     catch(err){ showError(err.message); $("#view-root").innerHTML="<p class='empty'>Could not load this view.</p>"; }
   }
   window.addEventListener("hashchange",renderRoute);
@@ -871,13 +905,22 @@
       actions.push(btn("dismiss","Not interested","btn small danger"));
     }
     if(o.package) actions.unshift(btn("package","View application","btn small ghost"));
+    // First action on every card, whatever its stage: the place where the
+    // requirements, the documents and the draft are all in one view.
+    actions.unshift("<a class='btn small' href='#/opportunity/"+encodeURIComponent(o.id)+
+      "'>Details &amp; apply</a>");
     // Always available, whatever stage it is at - clearing out a list the
     // agent filled unattended is tidying, and it is recoverable from the Bin.
     actions.push(btn("history","History","btn small ghost"));
     actions.push(btn("trash","Remove","btn small danger"));
 
+    // The title now opens our own detail page rather than the source site.
+    // Clicking an opportunity should lead to what this system knows about it -
+    // its requirements, your documents against them, the draft - not dump the
+    // owner on a portal with none of that. The original listing is still one
+    // click away on the line below.
     return "<article class='opp "+esc(o.match_status)+"' data-id='"+esc(o.id)+"'>"+
-      "<div class='opp-head'><h3><a href='"+esc(opp.url)+"' target='_blank' rel='noopener'>"+
+      "<div class='opp-head'><h3><a href='#/opportunity/"+encodeURIComponent(o.id)+"'>"+
         esc(opp.title||"Untitled")+"</a></h3>"+
         "<span class='pill "+esc(o.match_status)+"'>"+esc(o.match_status.replace("_"," "))+"</span></div>"+
       "<p class='muted'>"+esc(opp.source||"")+" · deadline "+esc(deadline)+
@@ -978,6 +1021,216 @@
       await loadNotifications();
       renderRoute();
     }catch(err){ showError(err.message); button.disabled=false; }
+  }
+
+
+  // ---------------- one opportunity, in full ----------------
+  // The screen the owner lands on when they click something the agent found.
+  // Everything needed to decide and to act is here, in the order the decision
+  // is actually made: what is this, what does it demand, do I have the papers,
+  // what would I be sending, and finally the call's own words to check it
+  // against.
+  async function renderOpportunityDetail(id){
+    var p=activeProfile(); if(!p){location.hash="#/onboarding";return;}
+    if(!id){ location.hash="#/opportunities"; return; }
+    var base="/profiles/"+p.id+"/opportunities/"+encodeURIComponent(id);
+    var d=await api(base+"/requirements");
+
+    var rules=d.submission.format_rules||{};
+    var ruleLines=[];
+    if(rules.file_format) ruleLines.push("Submit as "+rules.file_format);
+    if(rules.max_pages) ruleLines.push("Maximum "+rules.max_pages+" pages");
+    if(rules.font||rules.font_size) ruleLines.push([rules.font,rules.font_size].filter(Boolean).join(" "));
+    if(rules.line_spacing) ruleLines.push(rules.line_spacing+" line spacing");
+    if(rules.language) ruleLines.push("In "+rules.language);
+    (rules.other||[]).forEach(function(o){ ruleLines.push(o); });
+
+    var docs=d.required_documents||[];
+    var missing=docs.filter(function(x){return !x.held;});
+
+    $("#view-root").innerHTML =
+      "<p class='crumb'><a href='#/opportunities'>← All opportunities</a></p>"+
+      "<h1 class='view-title'>"+esc(d.title)+"</h1>"+
+      "<p class='view-sub'>"+esc(d.source||"")+
+        (d.deadline?" · deadline "+esc(d.deadline):"")+
+        " · <span class='pill "+esc(d.match_status)+"'>"+esc((d.match_status||"").replace("_"," "))+"</span>"+
+        (d.url?" · <a href='"+esc(d.url)+"' target='_blank' rel='noopener'>original listing</a>":"")+
+      "</p>"+
+
+      // --- what it asks for -------------------------------------------
+      "<section class='panel'><h2>What this call asks for</h2>"+
+        (d.submission.document_kind
+          ? "<p>It wants a <strong>"+esc(d.submission.document_kind)+"</strong>"+
+            (d.submission.submit_to?", sent to <strong>"+esc(d.submission.submit_to)+"</strong>":"")+
+            (d.submission.deadline?", by <strong>"+esc(d.submission.deadline)+"</strong>":"")+".</p>"
+          : "<p class='muted'>The requirements haven't been read off this call yet. "+
+            "Draft the application below and the agent will read them out of the "+
+            "listing first.</p>")+
+        ((d.submission.sections||[]).length
+          ? "<h3 class='sub'>Required sections</h3><ol class='spec-list'>"+
+            d.submission.sections.map(function(sec){
+              return "<li><strong>"+esc(sec.title)+"</strong>"+
+                (sec.guidance?"<span>"+esc(sec.guidance)+"</span>":"")+"</li>";
+            }).join("")+"</ol>"
+          : "")+
+        (ruleLines.length
+          ? "<h3 class='sub'>Format rules</h3><ul class='spec-rules'>"+
+            ruleLines.map(function(r){return "<li>"+esc(r)+"</li>";}).join("")+"</ul>"
+          : "")+
+        ((d.submission.eligibility||[]).length
+          ? "<h3 class='sub'>Who may apply</h3><ul class='spec-rules'>"+
+            d.submission.eligibility.map(function(e){return "<li>"+esc(e)+"</li>";}).join("")+"</ul>"
+          : "")+
+      "</section>"+
+
+      // --- documents, against the vault --------------------------------
+      "<section class='panel'><h2>Documents you'll need "+
+        "<span class='muted'>("+d.documents_ready+" of "+d.documents_total+" ready)</span></h2>"+
+        (missing.length
+          ? "<div class='advice'><strong>"+missing.length+" still to upload</strong>"+
+            "<p style='margin:6px 0 0;font-size:.86rem;'>These are attached from your "+
+            "documents automatically once they're in the vault.</p></div>"
+          : "<div class='advice'><strong>Everything this call asks for is already in your "+
+            "documents.</strong></div>")+
+        (docs.length
+          ? docs.map(function(x){
+              return "<div class='doc-slot'>"+
+                "<span class='doc-mark "+(x.held?"held":"needed")+"'>"+(x.held?"✓":"!")+"</span>"+
+                "<span class='doc-name'><strong>"+esc(x.label)+"</strong>"+
+                  "<span>"+(x.held
+                    ? (x.filename?"Using "+esc(x.filename):"On file")
+                    : "Not uploaded yet")+
+                    (x.demanded_by_call?" · asked for by this call":"")+"</span></span>"+
+                (x.held?"":"<a class='btn small plain' href='#/profile'>Upload</a>")+
+              "</div>";
+            }).join("")
+          : "<p class='muted'>This call doesn't name any documents, and your profile type "+
+            "has no standing requirements.</p>")+
+      "</section>"+
+
+      // --- what we can fill in for them --------------------------------
+      ((d.prefill||[]).length
+        ? "<section class='panel'><h2>Details we can fill in for you</h2>"+
+          "<p class='muted' style='margin:-6px 0 12px;'>Taken from your profile and used "+
+          "wherever this application asks for them. Nothing here was invented — if a "+
+          "field is missing, add it on your profile.</p>"+
+          "<table><tbody>"+d.prefill.map(function(f){
+            return "<tr><th>"+esc(f.label)+"</th><td>"+esc(f.value)+"</td></tr>";
+          }).join("")+"</tbody></table></section>"
+        : "")+
+
+      // --- the draft ----------------------------------------------------
+      "<section class='panel' id='draft-panel'><h2>Your application</h2>"+
+        draftBody(d)+
+      "</section>"+
+
+      // --- the call itself ----------------------------------------------
+      "<section class='panel'><h2>The call in full</h2>"+
+        (d.call_text
+          ? "<details><summary>Read what was published</summary><pre class='calltext'>"+
+            esc(d.call_text)+"</pre></details>"
+          : "<p class='muted'>The text of this listing couldn't be read — the site "+
+            "may have blocked the fetch. Open the original listing above.</p>")+
+      "</section>";
+
+    wireDetail(p.id, id, base, d);
+  }
+
+  // The draft, in whichever of its three states it is in: not written yet,
+  // being written, or written and editable.
+  function draftBody(d){
+    var status=(d.draft||{}).status;
+    var sections=(d.draft||{}).sections||[];
+    if(status==="drafting"){
+      return "<p class='status'><span class='spinner'></span> Writing it now. This takes a "+
+        "few minutes — the agent reads the call and writes each section in turn. "+
+        "You can leave this page; it carries on.</p>";
+    }
+    if(!sections.length){
+      return "<p class='muted'>No application written yet. The agent will read this "+
+        "call, work out the sections it demands, and write a draft against your "+
+        "profile and documents.</p>"+
+        (status==="no_structure_found"
+          ? "<div class='advice'><strong>Last time, no section structure could be read "+
+            "off this listing.</strong><p style='margin:6px 0 0;font-size:.86rem;'>That "+
+            "usually means the detail is in an attached document rather than the page. "+
+            "Try again, or say below what it should cover.</p></div>"
+          : "")+
+        "<label class='steer'>Anything it should emphasise? <span class='muted'>(optional)</span>"+
+          "<textarea id='draft-steer' rows='2' placeholder='e.g. focus on our rural "+
+          "broadband work'></textarea></label>"+
+        "<div class='opp-actions'><button type='button' class='btn' id='draft-go'>"+
+          "Write my application</button></div>";
+    }
+    return "<p class='muted' style='margin-top:-6px;'>Edit anything here — it's yours. "+
+      "The download is formatted the way the call demands.</p>"+
+      sections.map(function(sec,i){
+        return "<div class='draft-sec' data-i='"+i+"'>"+
+          "<h3 class='sub'>"+esc(sec.title)+"</h3>"+
+          (sec.guidance?"<p class='muted guidance'>"+esc(sec.guidance)+"</p>":"")+
+          "<textarea class='draft-body' rows='9'>"+esc(sec.body||"")+"</textarea>"+
+        "</div>";
+      }).join("")+
+      "<label class='steer'>Want it rewritten differently? <span class='muted'>(optional)</span>"+
+        "<textarea id='draft-steer' rows='2' placeholder='e.g. make it more technical'></textarea></label>"+
+      "<div class='opp-actions'>"+
+        "<button type='button' class='btn' id='draft-save'>Save my edits</button>"+
+        "<a class='btn plain' id='draft-download'>Download as .docx</a>"+
+        "<button type='button' class='btn ghost' id='draft-go'>Rewrite it</button>"+
+      "</div><p class='status' id='draft-status'></p>";
+  }
+
+  function wireDetail(profileId, id, base, d){
+    var dl=$("#draft-download");
+    if(dl) dl.href = base+"/document";
+
+    var save=$("#draft-save");
+    if(save) save.addEventListener("click",async function(){
+      save.disabled=true;
+      var sections=$all(".draft-sec").map(function(el,i){
+        var src=(d.draft.sections||[])[Number(el.dataset.i)]||{};
+        return {title:src.title||"", guidance:src.guidance||"",
+                body:$(".draft-body",el).value};
+      });
+      try{
+        await api(base+"/package",{method:"PUT",body:JSON.stringify({sections:sections})});
+        invalidate("/profiles/"+profileId);
+        $("#draft-status").textContent="Saved.";
+      }catch(err){ showError(err.message); }
+      save.disabled=false;
+    });
+
+    var go=$("#draft-go");
+    if(go) go.addEventListener("click",async function(){
+      go.disabled=true;
+      var steerEl=$("#draft-steer");
+      try{
+        await api(base+"/draft-full",{method:"POST",
+          body:JSON.stringify({steer:(steerEl&&steerEl.value.trim())||null})});
+        invalidate("/profiles/"+profileId);
+        pollDraft(profileId, id, base);
+      }catch(err){ showError(err.message); go.disabled=false; }
+    });
+  }
+
+  // Drafting runs in the background on the server and takes minutes, so the
+  // page watches rather than blocks. Slow poll on purpose: nothing here is
+  // improved by asking twice a second.
+  async function pollDraft(profileId, id, base){
+    var panel=$("#draft-panel");
+    if(panel) panel.innerHTML="<h2>Your application</h2>"+draftBody({draft:{status:"drafting"}});
+    for(var tries=0; tries<120; tries++){
+      await sleep(5000);
+      if(currentRoute()!=="opportunity" || routeParam()!==id) return;
+      invalidate(base);
+      try{ var fresh=await api(base+"/requirements"); }
+      catch(err){ continue; }
+      if((fresh.draft||{}).status!=="drafting"){
+        invalidate("/profiles/"+profileId);
+        renderRoute();
+        return;
+      }
+    }
   }
 
   // ---------------- profile & documents ----------------

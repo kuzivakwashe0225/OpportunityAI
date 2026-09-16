@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import re
+import socket
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
+from html.parser import HTMLParser
 from ipaddress import ip_address
-import socket
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
@@ -73,6 +75,74 @@ def _validate_public_url(url: str) -> str:
     ))
 
 
+# Tags whose *contents* are not page text at all. Stripping only the tags -
+# which is what a bare re.sub(r"<[^>]+>") does - leaves the JavaScript source
+# and the stylesheet sitting in the middle of the "text", which is worse than
+# useless once it reaches a language model with a limited context window.
+_NON_TEXT_TAGS = {"script", "style", "noscript", "svg", "canvas", "template", "iframe"}
+
+# Tags that should end up as a line break, so headings and list items do not
+# run into the sentence after them.
+_BLOCK_TAGS = {
+    "p", "div", "br", "li", "tr", "section", "article", "header", "footer",
+    "h1", "h2", "h3", "h4", "h5", "h6", "table", "ul", "ol", "blockquote",
+}
+
+
+class _TextExtractor(HTMLParser):
+    """Readable text out of a page, using the stdlib parser egp.py already uses.
+
+    Deliberately not BeautifulSoup: this project has stayed dependency-light
+    and this is a few dozen lines of the standard library doing a job that
+    does not need a full DOM.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+        self._suppress_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in _NON_TEXT_TAGS:
+            self._suppress_depth += 1
+        elif tag in _BLOCK_TAGS:
+            self._parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in _NON_TEXT_TAGS and self._suppress_depth:
+            self._suppress_depth -= 1
+        elif tag in _BLOCK_TAGS:
+            self._parts.append("\n")
+
+    def handle_data(self, data):
+        if self._suppress_depth:
+            return
+        self._parts.append(data)
+
+    def text(self) -> str:
+        joined = "".join(self._parts)
+        # Collapse runs of spaces/tabs, then runs of blank lines, so the result
+        # reads like prose rather than a column of whitespace.
+        joined = re.sub(r"[ \t\r\f\v]+", " ", joined)
+        lines = [line.strip() for line in joined.split("\n")]
+        return "\n".join(line for line in lines if line)
+
+
+def html_to_text(html: str) -> str:
+    """Readable text from an HTML page, or the input unchanged if it will not parse."""
+    try:
+        parser = _TextExtractor()
+        parser.feed(html)
+        parser.close()
+        extracted = parser.text()
+    except Exception:
+        return html
+    # A page that is mostly markup can still legitimately extract to very
+    # little (a JS-rendered app shell, say). Returning that is correct -
+    # returning the raw markup instead would be pretending we read something.
+    return extracted
+
+
 def _decode_body(body: bytes, content_type: str, encoding: str) -> str:
     """Text out of a response, whatever kind of document it is.
 
@@ -99,7 +169,20 @@ def _decode_body(body: bytes, content_type: str, encoding: str) -> str:
             return extract_text(body, content_type)
         except Exception:
             pass
-    return body.decode(encoding, errors="replace")
+
+    decoded = body.decode(encoding, errors="replace")
+
+    # HTML was the remaining hole, and by volume the biggest one. Storing the
+    # raw markup meant a single scholarship page was kept as 257,822
+    # characters of doctype, IE conditional comments, inline scripts and
+    # navigation - and everything downstream that reads a call (the
+    # eligibility matcher, the requirement extractor, the section drafter)
+    # was handed that instead of the prose. Measured on live data: 307 of 400
+    # stored opportunities held over 5k characters each, essentially none of
+    # it readable.
+    if content_type in ("text/html", "application/xhtml+xml"):
+        return html_to_text(decoded)
+    return decoded
 
 
 def fetch_public_page(

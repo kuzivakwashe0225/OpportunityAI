@@ -190,14 +190,29 @@ def test_an_unparseable_pdf_falls_back_rather_than_losing_the_opportunity():
     assert "not really a pdf" in page.content
 
 
-def test_html_is_still_decoded_exactly_as_before():
+def test_html_is_stored_as_its_words_not_its_markup():
+    """This used to assert the opposite - that HTML came back untouched.
+
+    That was the bug, and it was expensive. Storing the markup meant a single
+    scholarship page was kept as 257,822 characters of doctype, conditional
+    comments, inline scripts and navigation, and everything that reads a call
+    downstream - the eligibility matcher, the requirement extractor, the
+    section drafter - was handed that instead of the prose.
+    """
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, text="<html>hello</html>",
-                              headers={"content-type": "text/html; charset=utf-8"})
+        return httpx.Response(
+            200,
+            text="<html><head><script>track()</script></head>"
+                 "<body><h1>Call for Proposals</h1><p>Closes 3 October 2026.</p></body></html>",
+            headers={"content-type": "text/html; charset=utf-8"},
+        )
 
     page = fetch_public_page(
         "https://example.org/page",
         client=httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False),
     )
 
-    assert page.content == "<html>hello</html>"
+    assert "Call for Proposals" in page.content
+    assert "Closes 3 October 2026." in page.content
+    assert "track()" not in page.content
+    assert "<h1>" not in page.content
