@@ -19,6 +19,13 @@ class PublicPage:
     retrieved_at: str
     sha256: str
     content_type: str = "text/html"
+    # Links on the page that point at a document rather than another page.
+    #
+    # Extracting a page to readable text throws its markup away, and with it
+    # every href - which meant the application form a call links to was
+    # invisible to this system even when the call said "complete the attached
+    # form". These are kept so that form can be found, downloaded and filled.
+    document_links: tuple[str, ...] = ()
 
 
 MAX_REDIRECTS = 4
@@ -132,6 +139,12 @@ _MAIN_TAGS = {"main", "article"}
 _MIN_MAIN_CHARS = 400
 
 
+# Extensions worth following from a call page. Deliberately not every file
+# type: a .zip or a .jpg on a tender page is a logo or a drawing pack, not
+# something to read for requirements.
+_DOCUMENT_EXTENSIONS = (".pdf", ".doc", ".docx", ".rtf", ".odt", ".xls", ".xlsx")
+
+
 class _TextExtractor(HTMLParser):
     """Readable text out of a page, using the stdlib parser egp.py already uses.
 
@@ -150,6 +163,9 @@ class _TextExtractor(HTMLParser):
         self._main_parts: list[str] = []
         self._suppress_depth = 0
         self._main_depth = 0
+        # Ordered, de-duplicated: the order a call lists its attachments is
+        # usually meaningful, and the same form is often linked twice.
+        self._links: list[str] = []
 
     def _emit(self, chunk: str) -> None:
         self._parts.append(chunk)
@@ -157,6 +173,14 @@ class _TextExtractor(HTMLParser):
             self._main_parts.append(chunk)
 
     def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            for name, value in attrs:
+                if name != "href" or not value:
+                    continue
+                cleaned = value.split("#", 1)[0].strip()
+                if cleaned.lower().split("?", 1)[0].endswith(_DOCUMENT_EXTENSIONS):
+                    if cleaned not in self._links:
+                        self._links.append(cleaned)
         if tag in _MAIN_TAGS:
             self._main_depth += 1
         if tag in _NON_TEXT_TAGS or tag in _CHROME_TAGS:
@@ -187,11 +211,34 @@ class _TextExtractor(HTMLParser):
         lines = [line.strip() for line in joined.split("\n")]
         return "\n".join(line for line in lines if line)
 
+    def links(self) -> list[str]:
+        return list(self._links)
+
     def text(self) -> str:
         main = self._clean(self._main_parts)
         if len(main) >= _MIN_MAIN_CHARS:
             return main
         return self._clean(self._parts)
+
+
+def document_links(html: str, base_url: str = "") -> tuple[str, ...]:
+    """Absolute URLs of documents linked from this page.
+
+    Used to find the application form a call tells the applicant to complete.
+    Relative hrefs are resolved against the page they were found on, because
+    a tender board writes `/downloads/bid-form.docx` far more often than it
+    writes the full address.
+    """
+    try:
+        parser = _TextExtractor()
+        parser.feed(html)
+        parser.close()
+        found = parser.links()
+    except Exception:
+        return ()
+    if not base_url:
+        return tuple(found)
+    return tuple(urljoin(base_url, href) for href in found)
 
 
 def html_to_text(html: str) -> str:
@@ -288,12 +335,22 @@ def fetch_public_page(
                 content_type = (
                     response.headers.get("content-type", "text/html").split(";", 1)[0].strip().lower()
                 )
+                # Links are read from the markup before it is flattened to
+                # text, because flattening is what loses them - and the
+                # application form a call tells you to complete is only ever
+                # reachable through one.
+                links: tuple[str, ...] = ()
+                if content_type in ("text/html", "application/xhtml+xml"):
+                    links = document_links(
+                        body.decode(encoding, errors="replace"), target
+                    )
                 return PublicPage(
                     url=target,
                     content=_decode_body(body, content_type, encoding),
                     retrieved_at=datetime.now(timezone.utc).isoformat(),
                     sha256=sha256(body).hexdigest(),
                     content_type=content_type,
+                    document_links=links,
                 )
         raise ValueError("public source returned too many redirects")
     finally:

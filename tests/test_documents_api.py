@@ -1,7 +1,8 @@
 from fastapi.testclient import TestClient
 
 from conftest import sign_up
-from opportunity_agent import api
+from opportunity_agent import api, models_db
+from opportunity_agent import db as db_module
 from opportunity_agent.api import app
 
 
@@ -79,7 +80,35 @@ def test_upload_document_to_own_profile_succeeds(monkeypatch):
     assert response.status_code == 201
     body = response.json()
     assert body["original_filename"] == "cv.txt"
-    assert body["extraction_status"] == "pending"
+    # Read on the way in, not left "pending" for a later sweep. The text is
+    # what drafting quotes the applicant's real experience from, and a draft
+    # written an hour after the upload but before the sweep would have been
+    # written without it.
+    assert body["extraction_status"] == "extracted"
+
+    with db_module.SessionLocal() as session:
+        stored = session.query(models_db.Document).one()
+        assert "Software Engineer, Acme Corp" in stored.extracted_text
+
+
+def test_a_document_we_cannot_read_is_still_a_successful_upload(monkeypatch):
+    """A scanned certificate with no text layer is a normal thing to upload.
+    It must not fail the upload, and it must not fail a later draft."""
+    fake_client = FakeMinioClient()
+    monkeypatch.setattr(api, "_minio_client", lambda: fake_client)
+    monkeypatch.setattr(
+        api.documents_module, "readable_text",
+        lambda content, content_type: (_ for _ in ()).throw(RuntimeError("no text layer")),
+    )
+    profile = _make_profile()
+
+    response = client.post(
+        f"/profiles/{profile['id']}/documents",
+        files={"file": ("scan.pdf", b"%PDF-1.4 rubbish", "application/pdf")},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["extraction_status"] == "failed"
 
 
 def test_upload_document_to_someone_elses_profile_is_404(monkeypatch):

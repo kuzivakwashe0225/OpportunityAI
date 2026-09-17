@@ -138,8 +138,13 @@ def test_the_section_prompt_offers_only_the_profiles_own_facts():
 
     assert "Isaiah Chikeya" in prompt
     assert "AI Researcher HIT" in prompt
-    assert "Do not invent qualifications" in prompt
     assert "Policy Problem Statement" in prompt
+    # The guarantee, not one phrasing of it: the model is told the facts above
+    # are the only source and that it must not invent credentials. The wording
+    # has changed once already; what must not change is that it is said.
+    lowered = prompt.lower()
+    assert "the only source you may draw on" in lowered
+    assert "never invent" in lowered
 
 
 def test_a_section_that_cannot_be_written_is_empty_not_fatal():

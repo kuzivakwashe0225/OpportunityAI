@@ -29,6 +29,8 @@ from . import egp_session
 from . import application_spec as application_spec_module
 from . import extraction_llm as extraction_llm_module
 from . import section_drafting as section_drafting_module
+from . import evidence as evidence_module
+from . import application_form as application_form_module
 from . import throttle as throttle_module
 from .extraction_llm import ExtractedFacts, extract_facts_from_text
 
@@ -831,6 +833,19 @@ async def upload_document(
         bucket=DOCUMENTS_BUCKET,
     )
     document.object_key = key
+
+    # Read it now and keep what it says. The owner's CV is the only place
+    # their actual projects, training and results are written down, and
+    # drafting was previously given six one-line profile fields instead -
+    # which is exactly why a drafted application read like a stranger wrote
+    # it. Extraction failing is not a failed upload: the file is stored and
+    # useful either way.
+    try:
+        document.extracted_text = documents_module.readable_text(content, content_type)
+        document.extraction_status = "extracted" if document.extracted_text else "empty"
+    except Exception:
+        document.extraction_status = "failed"
+
     db.commit()
 
     # The agent asked for a document; a document arrived. Check straight away
@@ -1610,15 +1625,122 @@ def _page_text_for(opportunity: models_db.StoredOpportunity) -> str:
     return str(payload.get("title") or "")
 
 
+# Things a form asks for that must never be answered on the applicant's behalf.
+# A generated signature is a forgery, and a date the applicant did not choose
+# is a claim about when they signed.
+_DO_NOT_ANSWER = ("signature", "signed", "date signed", "official use", "stamp",
+                  "for office use", "witness")
+
+
+def _fetch_call_form(opportunity) -> dict | None:
+    """Find and read the form the call says to complete, if there is one.
+
+    Every step here is allowed to fail quietly. A call with no form is the
+    normal case, a link that 403s is the common case, and neither is a reason
+    to lose the rest of the application.
+    """
+    links = (opportunity.payload or {}).get("document_links") or []
+    chosen = application_form_module.likely_form(links)
+    if not chosen:
+        return None
+    try:
+        page = fetch_public_page(chosen)
+    except Exception:
+        return {"url": chosen, "filename": chosen.rsplit("/", 1)[-1],
+                "questions": [], "note": "the form could not be downloaded"}
+
+    questions = application_form_module.questions_in(page.content or "")
+    return {
+        "url": chosen,
+        "filename": chosen.rsplit("/", 1)[-1],
+        "questions": questions,
+        "text": (page.content or "")[:8000],
+        "note": "" if questions else "the form was downloaded but no fields could be read",
+    }
+
+
+def _requirements_for(spec, form, opportunity, profile) -> list[dict]:
+    """Everything this call asks for, as one ordered list.
+
+    The owner described their own process: "I first list down the
+    requirements then I start drafting each requirement step by step". This is
+    that list. It deliberately mixes sources - the call's own section
+    structure, the questions on its form, the documents it demands - because
+    an applicant does not care which part of the call a requirement came
+    from, only that it has to be answered.
+    """
+    requirements: list[dict] = []
+
+    for section in spec.sections:
+        requirements.append({
+            "kind": "section",
+            "prompt": section.title,
+            "guidance": section.guidance or "",
+            "source": "the call's required structure",
+            "answerable": True,
+        })
+
+    for question in (form or {}).get("questions") or []:
+        lowered = question.lower()
+        requirements.append({
+            "kind": "form_field",
+            "prompt": question,
+            "guidance": "",
+            "source": f"the application form ({(form or {}).get('filename')})",
+            # Signatures and office-use boxes are listed so the applicant sees
+            # them, and left blank because filling them would be a forgery.
+            "answerable": not any(word in lowered for word in _DO_NOT_ANSWER),
+        })
+
+    for item in spec.eligibility:
+        requirements.append({
+            "kind": "eligibility",
+            "prompt": item,
+            "guidance": "",
+            "source": "the call's eligibility rules",
+            "answerable": False,
+        })
+
+    held = pipeline_module.held_document_keys(profile)
+    for key in (opportunity.payload or {}).get("required_documents") or []:
+        requirements.append({
+            "kind": "document",
+            "prompt": profile_schema.document_label(
+                profile.profile_type, profile.fields, str(key)),
+            "guidance": "held" if str(key) in held else "not uploaded yet",
+            "source": "the documents the call demands",
+            "answerable": False,
+        })
+
+    return requirements
+
+
 def _build_full_draft(
     opportunity_id: str, profile_id: str, steer: str | None = None
 ) -> None:
-    """Read the call, then write each section it asks for.
+    """List what the call asks for, then answer each one in turn.
 
-    Runs in the background because it is slow by nature - a real call asked
-    for nine sections and a 3B model takes roughly a hundred seconds each, so
-    a synchronous request would time out long before finishing. Opens its own
-    session for the same reason: the request that scheduled it is long gone.
+    This is deliberately the applicant's own process rather than a single
+    "write me an application" call. The owner described it exactly: list the
+    requirements, then work through them one at a time, answering each from
+    your own strengths, qualifications and training.
+
+    Four things changed here after the owner reported the output was not
+    professional, and all four were about what the model was given rather
+    than which model it was:
+
+    * it now sees the applicant's actual CV and transcripts, not six one-line
+      profile fields - the old prompt had never seen a word of their evidence;
+    * it sees the whole list of requirements and what has already been
+      written, so section six does not repeat section two;
+    * it downloads the form the call tells the applicant to complete, and
+      answers its questions as requirements like any other;
+    * it writes a real covering letter instead of assembling one from a
+      template.
+
+    Runs in the background because it is slow by nature - nine sections at
+    roughly a hundred seconds each - and opens its own session because the
+    request that scheduled it is long gone.
     """
     session = db_module.SessionLocal()
     try:
@@ -1628,41 +1750,80 @@ def _build_full_draft(
             return
 
         settings = _ollama_settings()
+        call_text = _page_text_for(opportunity)
+
+        # --- 1. what does the call ask for? ------------------------------
         try:
-            spec = application_spec_module.extract_submission_spec(
-                _page_text_for(opportunity), **settings
-            )
+            spec = application_spec_module.extract_submission_spec(call_text, **settings)
         except Exception:
             spec = application_spec_module.SubmissionSpec()
 
+        # --- 2. is there a form to complete? -----------------------------
+        form = _fetch_call_form(opportunity)
+
+        # --- 3. who is applying, and what can they prove? ----------------
         subject = pipeline_module.profile_to_personal_profile(profile)
-        facts = section_drafting_module.profile_facts(subject)
+        dossier = evidence_module.dossier(subject, list(profile.documents))
         if steer:
-            facts += f"\n- What the applicant wants this proposal to focus on: {steer}"
+            dossier += f"\n\nWhat the applicant wants this application to emphasise: {steer}"
 
         class _Opp:
             title = (opportunity.payload or {}).get("title") or "this opportunity"
-            summary = _page_text_for(opportunity)[:1200]
+            summary = call_text[:1400]
 
-        sections = []
-        for section in spec.sections:
+        opp = _Opp()
+        requirements = _requirements_for(spec, form, opportunity, profile)
+
+        # --- 4. answer each requirement, in order, aware of the others ----
+        answerable = [r for r in requirements if r["answerable"]]
+        as_sections = [
+            application_spec_module.SectionSpec(
+                title=r["prompt"], guidance=r["guidance"])
+            for r in answerable
+        ]
+        budget = section_drafting_module.words_for_each_section(spec, len(as_sections) or 1)
+
+        sections: list[dict] = []
+        for index, requirement in enumerate(answerable):
+            section = as_sections[index]
+            # A form field wants a line, not an essay: "Full name" answered in
+            # 175 words is not an answer, it is a problem.
+            words = 40 if requirement["kind"] == "form_field" else budget
             body = section_drafting_module.draft_section(
-                section, spec, _Opp(), facts, **settings
+                section, spec, opp, dossier,
+                all_sections=as_sections, written=sections, max_words=words,
+                **settings,
             )
             sections.append({
-                "title": section.title,
-                "guidance": section.guidance,
+                "title": requirement["prompt"],
+                "guidance": requirement["guidance"],
+                "kind": requirement["kind"],
                 "body": body,
             })
 
+        # --- 5. the covering letter --------------------------------------
+        cover_letter = section_drafting_module.draft_cover_letter(
+            spec, opp, dossier, **settings
+        )
+
         package = dict(opportunity.package or {})
         package["spec"] = spec.model_dump(mode="json")
+        package["requirements"] = requirements
         package["sections"] = sections
+        package["cover_letter"] = cover_letter
+        if form:
+            # The form's text is not kept - it can be large, and the list
+            # endpoint would carry it to every browser. What is kept is what
+            # the owner needs: where it is and what it asked.
+            package["form"] = {k: v for k, v in form.items() if k != "text"}
+        package["evidence_used"] = evidence_module.has_real_evidence(list(profile.documents))
         package["status"] = "ready" if sections else "no_structure_found"
         opportunity.package = package
         _record_event(
             session, opportunity, "full_draft",
-            f"{len(sections)} sections" if sections else "no structure found in the call",
+            f"{len(sections)} requirements answered"
+            + (f", form: {form['filename']}" if form else "")
+            if sections else "no structure found in the call",
         )
         session.commit()
     except Exception:
@@ -1716,6 +1877,9 @@ def draft_full_application(
 
 class PackageEdit(BaseModel):
     sections: list[dict]
+    # Optional so an older client that only sends sections does not silently
+    # wipe the letter: None means "not edited", "" means "cleared".
+    cover_letter: str | None = None
 
 
 @app.put("/profiles/{profile_id}/opportunities/{opportunity_id}/package",
@@ -1742,10 +1906,15 @@ def edit_application_package(
         {
             "title": str(s.get("title") or "").strip(),
             "guidance": str(s.get("guidance") or ""),
+            # Kept so the exporter can still tell a proposal section from a
+            # form answer after the owner has edited them.
+            "kind": str(s.get("kind") or "section"),
             "body": str(s.get("body") or ""),
         }
         for s in payload.sections
     ]
+    if payload.cover_letter is not None:
+        package["cover_letter"] = payload.cover_letter
     package["status"] = "edited"
     opportunity.package = package
     _record_event(db, opportunity, "edited", f"{len(package['sections'])} sections")
@@ -1782,6 +1951,7 @@ def download_application_document(
         sections=sections,
         format_rules=(package.get("spec") or {}).get("format_rules") or {},
         applicant=(profile.fields or {}).get("name") or "",
+        cover_letter=str(package.get("cover_letter") or ""),
     )
     filename = "application.docx"
     return Response(
@@ -1912,6 +2082,16 @@ def opportunity_requirements(
         "draft": {
             "status": package.get("status"),
             "sections": package.get("sections") or [],
+            # The list the owner asked for: everything this call demands, in
+            # one place, whichever part of the call it came from.
+            "requirements": package.get("requirements") or [],
+            "cover_letter": package.get("cover_letter") or "",
+            "form": package.get("form"),
+            # Whether the draft was written with sight of their documents or
+            # only their profile fields. A thin draft written from six fields
+            # is doing its best with what it was given, and saying so is more
+            # use than letting them conclude the system cannot write.
+            "evidence_used": bool(package.get("evidence_used")),
         },
     }
 

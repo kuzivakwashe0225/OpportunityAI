@@ -88,6 +88,7 @@ def build_application_docx(
     sections: list[dict],
     format_rules: dict | None = None,
     applicant: str = "",
+    cover_letter: str = "",
 ) -> bytes:
     """The drafted application as a .docx, obeying the call's own format rules.
 
@@ -127,11 +128,29 @@ def build_application_docx(
         except (TypeError, ValueError):
             pass
 
+    # The letter goes first and on its own page, the way it would be posted.
+    # A covering letter stapled into the middle of a proposal is not a
+    # covering letter.
+    if cover_letter.strip():
+        document.add_heading("Covering letter", level=1)
+        for para in cover_letter.strip().split("\n\n"):
+            cleaned = para.strip()
+            if cleaned:
+                document.add_paragraph(cleaned)
+        document.add_page_break()
+
     document.add_heading(title, level=1)
     if applicant:
         document.add_paragraph(applicant)
 
-    for section in sections:
+    # Answers to a form's questions are a different kind of thing from the
+    # prose sections of a proposal, and running them together produces a
+    # document that is neither. They are grouped under their own heading, as
+    # question-and-answer, which is the shape the form itself has.
+    prose = [s for s in sections if s.get("kind") != "form_field"]
+    form_answers = [s for s in sections if s.get("kind") == "form_field"]
+
+    for section in prose:
         heading = str(section.get("title") or "").strip()
         if heading:
             document.add_heading(heading, level=2)
@@ -147,6 +166,47 @@ def build_application_docx(
             # the call requires.
             document.add_paragraph("[This section still needs to be written.]")
 
+    if form_answers:
+        document.add_page_break()
+        document.add_heading("Application form answers", level=1)
+        document.add_paragraph(
+            "These answer the questions on the form attached to the call. "
+            "Check each one against the form itself before submitting."
+        )
+        for answer in form_answers:
+            question = str(answer.get("title") or "").strip()
+            if question:
+                document.add_heading(question, level=3)
+            body = str(answer.get("body") or "").strip()
+            document.add_paragraph(body or "[Still to answer.]")
+
     buffer = BytesIO()
     document.save(buffer)
     return buffer.getvalue()
+
+# Enough for a CV, a transcript or a certificate - the documents an applicant
+# actually has - without letting a 200-page prospectus fill a small model's
+# whole context window. Measured against real CVs: two or three pages of text
+# is 4-6k characters, so this holds several times over.
+MAX_EXTRACTED_CHARS = 20_000
+
+
+def readable_text(content: bytes, content_type: str) -> str:
+    """The document's words, trimmed to something a prompt can carry.
+
+    Returns "" rather than raising for a file we cannot read - a scanned PDF
+    with no text layer is a normal thing for someone to upload, and it must
+    not fail their upload or their draft.
+    """
+    from .document_text import extract_text
+
+    try:
+        text = extract_text(content, content_type) or ""
+    except Exception:
+        return ""
+    text = text.strip()
+    if len(text) <= MAX_EXTRACTED_CHARS:
+        return text
+    # Keep the head: a CV puts the qualifications and recent roles first, and
+    # the tail is usually referees and hobbies.
+    return text[:MAX_EXTRACTED_CHARS]

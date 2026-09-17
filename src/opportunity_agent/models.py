@@ -74,6 +74,11 @@ class Opportunity(BaseModel):
     interests: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
+    # Documents linked from the call page - the application form, the annexes.
+    # Carried through from the fetch so drafting can find the form a call
+    # tells the applicant to complete, which for many tenders and bursaries
+    # *is* the application.
+    document_links: list[str] = Field(default_factory=list)
     retrieved_at: str | None = None
     content_sha256: str | None = None
     requirements_verified: bool = False

@@ -15,7 +15,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import JSON, Date, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, Date, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -106,6 +106,17 @@ class Document(Base):
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     size_bytes: Mapped[int] = mapped_column(nullable=False)
     extraction_status: Mapped[str] = mapped_column(String(20), default="skipped")
+    # The document's own words, kept.
+    #
+    # This used to be extracted, mined for a handful of profile fields, and
+    # thrown away - which is why a drafted application read like a stranger
+    # wrote it. The owner's CV is where their strengths, their training and
+    # their actual projects live; a prompt built from six one-line profile
+    # fields cannot say any of it. Now drafting reads this.
+    #
+    # Capped when written (documents.py): enough for a CV or a transcript,
+    # not so much that a 200-page prospectus fills the model's context.
+    extracted_text: Mapped[str | None] = mapped_column(Text, default=None)
     uploaded_at: Mapped[datetime] = mapped_column(default=_now)
 
     profile: Mapped["Profile"] = relationship(back_populates="documents")

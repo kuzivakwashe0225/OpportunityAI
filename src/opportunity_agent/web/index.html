@@ -282,6 +282,18 @@
   .steer textarea{width:100%;margin-top:6px;padding:10px;border:1px solid var(--line);
     border-radius:6px;font-family:inherit;font-size:.9rem;}
 
+  .reqs{list-style:none;counter-reset:req;margin:0;padding:0;}
+  .req{counter-increment:req;display:flex;gap:10px;align-items:baseline;
+    padding:7px 0;border-bottom:1px solid var(--line);
+    font-family:ui-sans-serif,system-ui,sans-serif;font-size:.88rem;}
+  .req:last-child{border-bottom:0;}
+  .req-mark{flex:none;width:20px;height:20px;border-radius:50%;display:grid;
+    place-items:center;font-size:.7rem;font-weight:700;color:#fff;background:var(--ink-soft);}
+  .req.done .req-mark{background:#1c7c4a;}
+  .req.todo .req-mark{background:var(--accent);}
+  .req.na .req-mark{background:var(--line);color:var(--ink-soft);}
+  .req-body{flex:1;min-width:0;}
+
   /* ---------- onboarding ---------- */
   .steps{display:flex;gap:8px;margin-bottom:24px;flex-wrap:wrap;}
   .step{flex:1;min-width:120px;padding:11px 14px;border:1px solid var(--line);border-radius:6px;
@@ -1136,6 +1148,9 @@
           }).join("")+"</tbody></table></section>"
         : "")+
 
+      // --- everything this call demands, in one list --------------------
+      requirementsPanel(d)+
+
       // --- the draft ----------------------------------------------------
       "<section class='panel' id='draft-panel'><h2>Your application</h2>"+
         draftBody(d)+
@@ -1151,6 +1166,58 @@
       "</section>";
 
     wireDetail(p.id, id, base, d);
+  }
+
+  // Everything the call asks for, gathered into one list.
+  //
+  // The owner described their own process and this is the first half of it:
+  // "I first list down the requirements then I start drafting each
+  // requirement step by step". Sources are mixed on purpose - a section the
+  // call demands, a question on its form and a certificate it wants are all
+  // just things that have to be dealt with before this can be submitted.
+  function requirementsPanel(d){
+    var reqs=(d.draft||{}).requirements||[];
+    var form=(d.draft||{}).form;
+    if(!reqs.length && !form) return "";
+
+    var byKind={section:[],form_field:[],eligibility:[],document:[]};
+    reqs.forEach(function(r){ (byKind[r.kind]||byKind.section).push(r); });
+
+    // Which ones have an answer written against them.
+    var answered={};
+    ((d.draft||{}).sections||[]).forEach(function(sec){
+      if((sec.body||"").trim()) answered[sec.title]=true;
+    });
+
+    function group(title, list, note){
+      if(!list.length) return "";
+      return "<h3 class='sub'>"+esc(title)+" <span class='muted'>("+list.length+")</span></h3>"+
+        (note?"<p class='muted' style='margin:-4px 0 8px;font-size:.85rem;'>"+esc(note)+"</p>":"")+
+        "<ol class='reqs'>"+list.map(function(r){
+          var state = !r.answerable ? "na" : (answered[r.prompt] ? "done" : "todo");
+          var label = !r.answerable ? "\u2014" : (answered[r.prompt] ? "\u2713" : "\u00b7");
+          return "<li class='req "+state+"'><span class='req-mark'>"+label+"</span>"+
+            "<span class='req-body'><strong>"+esc(r.prompt)+"</strong>"+
+            (r.guidance?"<span class='muted'> \u2014 "+esc(r.guidance)+"</span>":"")+
+            "</span></li>";
+        }).join("")+"</ol>";
+    }
+
+    return "<section class='panel'><h2>What you have to answer</h2>"+
+      "<p class='muted' style='margin:-6px 0 14px;'>Everything this call asks for, "+
+      "in one list. Each one is answered in turn below.</p>"+
+      (form
+        ? "<div class='advice'><strong>This call has a form to complete.</strong>"+
+          "<p style='margin:6px 0 0;font-size:.86rem;'>"+esc(form.filename||"")+
+          (form.note?" \u2014 "+esc(form.note):"")+
+          " <a href='"+esc(form.url)+"' target='_blank' rel='noopener'>open the original</a>"+
+          "</p></div>"
+        : "")+
+      group("Sections the call requires", byKind.section)+
+      group("Questions on the form", byKind.form_field)+
+      group("Documents to attach", byKind.document, "Upload these on your profile.")+
+      group("Who may apply", byKind.eligibility, "Check these against yourself before submitting.")+
+    "</section>";
   }
 
   // The draft, in whichever of its three states it is in: not written yet,
@@ -1179,8 +1246,22 @@
         "<div class='opp-actions'><button type='button' class='btn' id='draft-go'>"+
           "Write my application</button></div>";
     }
+    var letter=(d.draft||{}).cover_letter||"";
+    var thin=(d.draft||{}).evidence_used===false;
+
     return "<p class='muted' style='margin-top:-6px;'>Edit anything here — it's yours. "+
       "The download is formatted the way the call demands.</p>"+
+      (thin
+        ? "<div class='advice'><strong>This was written from your profile alone.</strong>"+
+          "<p style='margin:6px 0 0;font-size:.86rem;'>No readable documents were on "+
+          "file, so it could not quote your actual projects, results or training. "+
+          "Upload your CV and redraft — it makes more difference than anything "+
+          "else here.</p></div>"
+        : "")+
+      (letter
+        ? "<div class='draft-sec'><h3 class='sub'>Covering letter</h3>"+
+          "<textarea class='draft-body' rows='10' data-letter='1'>"+esc(letter)+"</textarea></div>"
+        : "")+
       sections.map(function(sec,i){
         return "<div class='draft-sec' data-i='"+i+"'>"+
           "<h3 class='sub'>"+esc(sec.title)+"</h3>"+
@@ -1204,13 +1285,17 @@
     var save=$("#draft-save");
     if(save) save.addEventListener("click",async function(){
       save.disabled=true;
-      var sections=$all(".draft-sec").map(function(el,i){
+      var sections=$all(".draft-sec[data-i]").map(function(el){
         var src=(d.draft.sections||[])[Number(el.dataset.i)]||{};
         return {title:src.title||"", guidance:src.guidance||"",
-                body:$(".draft-body",el).value};
+                kind:src.kind||"section", body:$(".draft-body",el).value};
       });
+      var letterBox=$("[data-letter]");
       try{
-        await api(base+"/package",{method:"PUT",body:JSON.stringify({sections:sections})});
+        await api(base+"/package",{method:"PUT",body:JSON.stringify({
+          sections:sections,
+          cover_letter: letterBox ? letterBox.value : undefined
+        })});
         invalidate("/profiles/"+profileId);
         $("#draft-status").textContent="Saved.";
       }catch(err){ showError(err.message); }

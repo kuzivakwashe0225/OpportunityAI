@@ -43,6 +43,8 @@ def page_to_opportunity(page: PublicPage, *, title: str) -> Opportunity:
         "requirements_verified": True,
         "content_type": page.content_type,
         "parser_version": PARSER_VERSION,
+        # Kept so drafting can find the form the call says to complete.
+        "document_links": list(getattr(page, "document_links", ()) or ()),
     })
 
 

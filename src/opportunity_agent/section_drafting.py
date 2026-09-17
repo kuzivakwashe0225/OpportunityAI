@@ -33,33 +33,82 @@ from .extraction_llm import (
     _TIMEOUT_SECONDS,
 )
 
-# Long enough for a real section, short enough that a small model does not
-# wander. The page limits these calls impose are tight - POTRAZ allowed 3.5
-# pages for nine sections - so verbosity is a defect here, not a feature.
-_MAX_SECTION_WORDS = 220
+# What one page of Times New Roman 12 at 1.5 spacing actually holds. Used to
+# turn a call's page limit into a word budget per section, because "3.5 pages
+# for nine sections" is a real constraint and a section that ignores it is a
+# section the owner has to cut by hand.
+_WORDS_PER_PAGE = 450
 
-_SECTION_PROMPT = """You are drafting one section of a {document_kind} for this call.
+# When the call states no limit. Long enough to say something, short enough
+# that a small model does not wander into padding.
+_DEFAULT_SECTION_WORDS = 220
 
-CALL: {title}
+# Floor and ceiling whatever the arithmetic says. Below the floor a section is
+# a sentence and answers nothing; above the ceiling a 3B model loses the thread
+# and starts repeating itself.
+_MIN_SECTION_WORDS = 110
+_MAX_SECTION_WORDS = 600
+
+_SECTION_PROMPT = """You are helping an applicant write one section of a \
+{document_kind}. Write it as they would write it about themselves: specific, \
+evidenced, and in the first person where the section is about them.
+
+THE CALL: {title}
 {call_context}
 
-SECTION TO WRITE: {section_title}
+THE WHOLE APPLICATION MUST COVER THESE, IN ORDER:
+{all_sections}
+
+{written_so_far}YOU ARE WRITING SECTION {position}: {section_title}
 {section_guidance}
 
-ABOUT THE APPLICANT - this is the only information you may use about them:
+EVERYTHING KNOWN ABOUT THE APPLICANT - the only source you may draw on:
 {profile_facts}
 
-Rules:
-- Write only the body of this section. No heading, no preamble, no sign-off.
-- Do not invent qualifications, employers, institutions, dates or results. If \
-the applicant information above does not support a claim, do not make it.
-- Where the section calls for analysis or proposed work rather than facts about \
-the applicant, write substantive content addressing the call's subject.
-- Around {max_words} words. Plain professional prose, no bullet lists unless \
-the section is naturally a list.
-- British English.
+How to write it:
+- Answer this section's question fully and directly. Do not restate the \
+question, and do not write an introduction to your answer.
+- Use the applicant's real specifics from the evidence above - actual project \
+names, employers, qualifications, dates, results. A sentence naming a real \
+project is worth a paragraph of "the applicant is passionate about".
+- Never invent a qualification, employer, institution, date or result. If the \
+evidence does not support a claim, leave the claim out.
+- Where the section asks for analysis or proposed work rather than facts about \
+the applicant, write substantive content on the call's subject and connect it \
+to what the applicant has actually done.
+- Do not repeat what the earlier sections already said. This section has its \
+own job.
+- About {max_words} words. Plain professional prose. British English.
+- Output the section body only: no heading, no title, no markdown, no \
+sign-off, no note about being an AI.
 
-Write the section now:"""
+Write it now:"""
+
+_COVER_LETTER_PROMPT = """Write a covering letter for this application, in the \
+applicant's own voice.
+
+THE CALL: {title}
+{call_context}
+
+{addressee}
+
+EVERYTHING KNOWN ABOUT THE APPLICANT - the only source you may draw on:
+{profile_facts}
+
+How to write it:
+- Open by saying what is being applied for. Never open with "I am writing to \
+apply" followed by nothing - say which call, and why this applicant in \
+particular is answering it.
+- Two or three short paragraphs of substance: the specific qualification, \
+project or contract that makes them a credible applicant for THIS call, named \
+exactly as it appears in their evidence.
+- Close with what is enclosed and how to reach them.
+- Never invent a qualification, employer, institution, date or result.
+- Around {max_words} words. British English. No markdown, no placeholders \
+like [Your Name] - use their real name, and leave out anything you do not \
+have.
+
+Write the letter now:"""
 
 
 def profile_facts(profile) -> str:
@@ -106,24 +155,121 @@ def profile_facts(profile) -> str:
     return "\n".join(bits) if bits else "- (the applicant has not filled in their profile)"
 
 
+def words_for_each_section(spec, section_count: int) -> int:
+    """Turn the call's page limit into a per-section word budget.
+
+    A call that says "not more than 3.5 pages" and lists nine sections is
+    asking for roughly 175 words each, and nine 220-word sections overshoot it
+    by half a page - which the owner then has to cut by hand, section by
+    section, which is the work this was supposed to save.
+    """
+    max_pages = getattr(getattr(spec, "format_rules", None), "max_pages", None)
+    if not max_pages or section_count < 1:
+        return _DEFAULT_SECTION_WORDS
+    try:
+        total = float(max_pages) * _WORDS_PER_PAGE
+    except (TypeError, ValueError):
+        return _DEFAULT_SECTION_WORDS
+    return max(_MIN_SECTION_WORDS, min(_MAX_SECTION_WORDS, int(total / section_count)))
+
+
+def strip_leaked_heading(body: str, section_title: str) -> str:
+    """Remove a heading the model added despite being told not to.
+
+    Small models restate the section title as a markdown heading roughly a
+    third of the time. Left in, it lands in the .docx underneath the real
+    heading, so every section appears titled twice.
+    """
+    text = (body or "").strip()
+    if not text:
+        return ""
+    lines = text.split("\n")
+    first = lines[0].strip()
+    looks_like_heading = (
+        first.startswith("#")
+        or (first.rstrip(":").strip().lower() == (section_title or "").strip().lower())
+        or (first.startswith("**") and first.endswith("**") and len(first) < 120)
+    )
+    if looks_like_heading:
+        lines = lines[1:]
+    # Markdown emphasis in a Word document is noise, not formatting.
+    cleaned = "\n".join(lines).strip()
+    for marker in ("### ", "## ", "# "):
+        cleaned = cleaned.replace(marker, "")
+    return cleaned.strip()
+
+
+def _call_context(spec: SubmissionSpec, opportunity) -> str:
+    bits = []
+    if spec.eligibility:
+        bits.append("Who may apply: " + "; ".join(spec.eligibility))
+    if spec.deadline:
+        bits.append("Closes: " + spec.deadline)
+    summary = (getattr(opportunity, "summary", "") or "")[:1400]
+    if summary:
+        bits.append("From the call: " + summary)
+    return "\n".join(bits)
+
+
+def _already_written(written: list[dict] | None) -> str:
+    """A digest of the sections drafted before this one.
+
+    Without it each section is written by something that has never seen the
+    others, and it shows: the objectives contradict the problem statement, and
+    the same sentence about the applicant appears in four places. A person
+    drafting by hand has the earlier sections in front of them, so this puts
+    them there.
+
+    The opening line of each is enough to convey what ground it covered -
+    passing the full text would crowd out the applicant's own evidence, which
+    is the thing that must not be crowded out.
+    """
+    if not written:
+        return ""
+    lines = []
+    for item in written:
+        title = str(item.get("title") or "").strip()
+        body = " ".join(str(item.get("body") or "").split())
+        if not title:
+            continue
+        lines.append(f"- {title}: {body[:180]}{'...' if len(body) > 180 else ''}")
+    if not lines:
+        return ""
+    return (
+        "ALREADY WRITTEN - do not repeat this ground:\n"
+        + "\n".join(lines)
+        + "\n\n"
+    )
+
+
 def build_section_prompt(
     section: SectionSpec,
     spec: SubmissionSpec,
     opportunity,
     facts: str,
-    max_words: int = _MAX_SECTION_WORDS,
+    max_words: int = _DEFAULT_SECTION_WORDS,
+    *,
+    all_sections: list[SectionSpec] | None = None,
+    written: list[dict] | None = None,
 ) -> str:
-    context_bits = []
-    if spec.eligibility:
-        context_bits.append("Who may apply: " + "; ".join(spec.eligibility))
-    summary = (getattr(opportunity, "summary", "") or "")[:900]
-    if summary:
-        context_bits.append("From the call: " + summary)
+    sections = list(all_sections or spec.sections or [section])
+    titles = "\n".join(
+        f"{n}. {sec.title}" for n, sec in enumerate(sections, start=1)
+    ) or f"1. {section.title}"
+    try:
+        position = next(
+            n for n, sec in enumerate(sections, start=1) if sec.title == section.title
+        )
+    except StopIteration:
+        position = 1
 
     return _SECTION_PROMPT.format(
         document_kind=spec.document_kind or "application",
         title=getattr(opportunity, "title", "this opportunity"),
-        call_context="\n".join(context_bits),
+        call_context=_call_context(spec, opportunity),
+        all_sections=titles,
+        written_so_far=_already_written(written),
+        position=position,
         section_title=section.title,
         section_guidance=(f"The call says this section should cover: {section.guidance}"
                           if section.guidance else ""),
@@ -132,21 +278,28 @@ def build_section_prompt(
     )
 
 
-def draft_section(
-    section: SectionSpec,
-    spec: SubmissionSpec,
-    opportunity,
-    facts: str,
-    *,
-    base_url: str = DEFAULT_OLLAMA_URL,
-    model: str = DEFAULT_MODEL,
-    client: httpx.Client | None = None,
+def build_cover_letter_prompt(
+    spec: SubmissionSpec, opportunity, facts: str, max_words: int = 320
 ) -> str:
-    """One section's body, or "" if it could not be written.
+    submit_to = (spec.submit_to or "").strip()
+    addressee = (
+        f"ADDRESSED TO: {submit_to}" if submit_to
+        else "ADDRESSED TO: the selection committee (no named recipient was given)"
+    )
+    return _COVER_LETTER_PROMPT.format(
+        title=getattr(opportunity, "title", "this opportunity"),
+        call_context=_call_context(spec, opportunity),
+        addressee=addressee,
+        profile_facts=facts,
+        max_words=max_words,
+    )
 
-    Never raises: a section the model could not produce becomes an empty one
-    for the owner to fill, which is still a usable skeleton. Losing the whole
-    package because section 6 of 9 timed out would not be.
+
+def _ask(prompt: str, *, base_url: str, model: str, client: httpx.Client | None) -> str:
+    """One model call, or "" if anything at all goes wrong.
+
+    Never raises. Losing a whole nine-section package because section six
+    timed out would be far worse than one empty section the owner fills in.
     """
     owns_client = client is None
     http_client = client or httpx.Client(timeout=_TIMEOUT_SECONDS)
@@ -155,11 +308,13 @@ def draft_section(
             f"{base_url}/api/chat",
             json={
                 "model": model,
-                "messages": [{
-                    "role": "user",
-                    "content": build_section_prompt(section, spec, opportunity, facts),
-                }],
+                "messages": [{"role": "user", "content": prompt}],
                 "stream": False,
+                # Low but not zero: an application should read as considered
+                # prose, not as the single most probable continuation, which
+                # at this size is where the "passionate and dedicated" filler
+                # comes from.
+                "options": {"temperature": 0.4},
             },
         )
         response.raise_for_status()
@@ -174,3 +329,51 @@ def draft_section(
     if not isinstance(message, dict):
         return ""
     return (message.get("content") or "").strip()
+
+
+def draft_section(
+    section: SectionSpec,
+    spec: SubmissionSpec,
+    opportunity,
+    facts: str,
+    *,
+    all_sections: list[SectionSpec] | None = None,
+    written: list[dict] | None = None,
+    max_words: int | None = None,
+    base_url: str = DEFAULT_OLLAMA_URL,
+    model: str = DEFAULT_MODEL,
+    client: httpx.Client | None = None,
+) -> str:
+    """One section's body, or "" if it could not be written."""
+    sections = list(all_sections or spec.sections or [section])
+    budget = max_words or words_for_each_section(spec, len(sections))
+    prompt = build_section_prompt(
+        section, spec, opportunity, facts, budget,
+        all_sections=sections, written=written,
+    )
+    return strip_leaked_heading(
+        _ask(prompt, base_url=base_url, model=model, client=client), section.title
+    )
+
+
+def draft_cover_letter(
+    spec: SubmissionSpec,
+    opportunity,
+    facts: str,
+    *,
+    max_words: int = 320,
+    base_url: str = DEFAULT_OLLAMA_URL,
+    model: str = DEFAULT_MODEL,
+    client: httpx.Client | None = None,
+) -> str:
+    """A covering letter in the applicant's voice, or "" if it failed.
+
+    Written rather than assembled from a template. The template version -
+    still in drafting.py, and still the right answer when there is no model -
+    cannot say why *this* applicant suits *this* call, and a letter that
+    cannot say that is the "unprofessional email" the owner objected to.
+    """
+    prompt = build_cover_letter_prompt(spec, opportunity, facts, max_words)
+    return strip_leaked_heading(
+        _ask(prompt, base_url=base_url, model=model, client=client), "Covering letter"
+    )

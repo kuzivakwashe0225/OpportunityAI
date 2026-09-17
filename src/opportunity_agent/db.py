@@ -64,7 +64,39 @@ SessionLocal = make_sessionmaker(engine)
 def init_db(bind_engine: Engine | None = None) -> None:
     from . import models_db  # noqa: F401  (import registers the models on Base)
 
-    Base.metadata.create_all(bind=bind_engine or engine)
+    target = bind_engine or engine
+    Base.metadata.create_all(bind=target)
+    _add_missing_columns(target)
+
+
+def _add_missing_columns(bind_engine: Engine) -> None:
+    """Add columns the models declare and the live tables do not have.
+
+    `create_all` creates missing *tables* and silently ignores missing
+    *columns*, which has already cost this deployment one outage: a
+    `notifications.profile_id` that existed in the model and not in Postgres
+    made every notification query 500 until it was added by hand.
+
+    Deliberately additive and nothing else. It never drops a column, never
+    changes a type, and never touches data - so the worst it can do on a
+    database it does not understand is nothing. Anything beyond adding a
+    nullable column is a real migration and should be written as one.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(bind_engine)
+    with bind_engine.begin() as connection:
+        for table in Base.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue
+            present = {c["name"] for c in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in present or not column.nullable:
+                    continue
+                kind = column.type.compile(dialect=bind_engine.dialect)
+                connection.execute(
+                    text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {kind}')
+                )
 
 
 def get_session() -> Iterator[Session]:
