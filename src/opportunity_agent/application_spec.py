@@ -31,6 +31,8 @@ Two deliberate limits:
 
 from __future__ import annotations
 
+import re
+
 import json
 
 import httpx
@@ -215,6 +217,74 @@ def parse_spec(payload: dict) -> SubmissionSpec:
     )
 
 
+
+# A call that lists its required structure almost always numbers it:
+#
+#   The proposal must be structured as follows:
+#   1. Title of the Proposed Policy Research
+#   2. Policy Problem Statement
+#   ...
+#
+# Reading that with a regular expression is completely reliable, and asking a
+# 3B model to do it is not. A real run returned all nine sections one day and
+# none at all the next, from the same text - and "none" collapses the whole
+# application to a covering letter, which is the failure the owner reported
+# in the first place.
+#
+# So the model still goes first, because it handles prose that does not
+# number itself. This catches it when it comes back empty-handed.
+_NUMBERED_HEADING = re.compile(
+    r"^\s{0,8}(?:\(?(?:\d{1,2}|[ivx]{1,4}|[a-z])[\.\)]|[-\u2022])\s+"
+    r"([A-Z][^\n]{3,90}?)\s*$",
+    re.MULTILINE,
+)
+
+# Phrases that introduce the list of required sections. Looking for the list
+# *after* one of these avoids picking up a numbered list of eligibility rules
+# or of documents to attach.
+_STRUCTURE_CUES = (
+    "structured as follows", "must be structured", "should be structured",
+    "must contain the following", "should contain the following",
+    "must include the following", "should include the following",
+    "the following sections", "following structure", "proposal structure",
+    "format of the proposal", "sections:", "structure:",
+)
+
+# Fewer than this and it is probably not a section list at all.
+_MIN_HEADINGS = 3
+_MAX_HEADINGS = 20
+
+
+def sections_from_text(text: str) -> list[SectionSpec]:
+    """The call's own numbered section list, or [] if it does not have one."""
+    body = text or ""
+    lowered = body.lower()
+
+    start = -1
+    for cue in _STRUCTURE_CUES:
+        found = lowered.find(cue)
+        if found != -1 and (start == -1 or found < start):
+            start = found
+    if start == -1:
+        return []
+
+    # Everything after the cue, capped: a section list runs to a few hundred
+    # characters, and reading further starts picking up unrelated lists.
+    window = body[start:start + 2500]
+    headings = [" ".join(m.group(1).split()).strip(" .:-") for m in _NUMBERED_HEADING.finditer(window)]
+
+    cleaned: list[str] = []
+    for heading in headings:
+        if not (4 <= len(heading) <= 90):
+            continue
+        if heading.lower() in (h.lower() for h in cleaned):
+            continue
+        cleaned.append(heading)
+
+    if len(cleaned) < _MIN_HEADINGS:
+        return []
+    return [SectionSpec(title=h) for h in cleaned[:_MAX_HEADINGS]]
+
 def extract_submission_spec(
     text: str,
     *,
@@ -227,6 +297,12 @@ def extract_submission_spec(
     Returns an empty spec rather than raising when the page cannot be read or
     the model answers with nonsense - an unreadable call should cost the
     tailored draft, not the whole discovery cycle.
+
+    When the model reports no sections, the call's own numbered list is read
+    off the text instead. The same POTRAZ text gave nine sections on one run
+    and none on the next; with no sections there is nothing to draft, and the
+    whole application collapses back to a covering letter - which is the
+    complaint this was all meant to answer.
     """
     if not (text or "").strip():
         return SubmissionSpec()
@@ -260,4 +336,9 @@ def extract_submission_spec(
     if not isinstance(parsed, dict):
         return SubmissionSpec()
 
-    return parse_spec(parsed)
+    spec = parse_spec(parsed)
+    if not spec.sections:
+        fallback = sections_from_text(text)
+        if fallback:
+            spec = spec.model_copy(update={"sections": fallback})
+    return spec

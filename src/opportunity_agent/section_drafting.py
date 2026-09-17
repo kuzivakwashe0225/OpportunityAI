@@ -213,7 +213,7 @@ out entirely.
 project or contract that makes them a credible applicant for THIS call, named \
 exactly as it appears in their evidence.
 - Close with what is enclosed and how to reach them.
-- Never invent a qualification, employer, institution, date or result.
+- Every fact you state about the applicant must appear in the evidence above. Do not add a university, an employer, a project or a result that is not written there, and do not upgrade what it says - if it says they attended a symposium, they attended it; they did not organise it.
 - Around {max_words} words. British English. No markdown, no placeholders \
 like [Your Name] - use their real name, and leave out anything you do not \
 have.

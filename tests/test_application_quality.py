@@ -722,3 +722,114 @@ def test_arithmetic_asterisks_are_left_alone():
     body = "The budget is 3 * 450 words in total."
 
     assert section_drafting.strip_leaked_heading(body, "Budget") == body
+
+
+# --------------------------------------------------------------------------
+# 10. Reading the requirements must not depend on the model's mood
+# --------------------------------------------------------------------------
+# The same POTRAZ text gave nine sections on one run and none on the next.
+# With no sections there is nothing to draft, and the application collapses
+# back to a covering letter - the exact complaint this work was answering.
+
+from opportunity_agent.application_spec import sections_from_text  # noqa: E402
+
+STRUCTURED_CALL = """Proposals must not exceed 3.5 pages.
+
+The proposal must be structured as follows:
+1. Title of the Proposed Policy Research
+2. Policy Problem Statement
+3. Research Objectives
+4. Methodology
+5. Budget and Timeline
+
+Submit to research.development@potraz.zw by 3 October 2026."""
+
+
+def test_a_numbered_section_list_is_read_without_the_model():
+    sections = sections_from_text(STRUCTURED_CALL)
+
+    assert [s.title for s in sections] == [
+        "Title of the Proposed Policy Research",
+        "Policy Problem Statement",
+        "Research Objectives",
+        "Methodology",
+        "Budget and Timeline",
+    ]
+
+
+@pytest.mark.parametrize("cue", [
+    "The proposal must be structured as follows:",
+    "Applications should contain the following sections:",
+    "Proposal structure:",
+])
+def test_the_usual_ways_of_introducing_a_structure_are_recognised(cue):
+    text = cue + "\n1. Background\n2. Objectives\n3. Method\n"
+
+    assert len(sections_from_text(text)) == 3
+
+
+def test_lettered_and_bulleted_lists_work_too():
+    text = "must be structured as follows:\n(a) Background\n(b) Objectives\n(c) Method\n"
+
+    assert len(sections_from_text(text)) == 3
+
+
+def test_a_call_with_no_structure_yields_nothing_rather_than_guessing():
+    assert sections_from_text("Send us a proposal by October. We fund ICT research.") == []
+
+
+def test_a_numbered_list_that_is_not_a_structure_is_not_mistaken_for_one():
+    """Eligibility rules and document lists are numbered too. Without the cue
+    phrase, nothing is taken."""
+    text = "Eligibility:\n1. You must be resident in Zimbabwe\n2. You must hold a degree\n"
+
+    assert sections_from_text(text) == []
+
+
+def test_too_few_headings_is_not_a_section_list():
+    text = "structured as follows:\n1. Everything you want to say\n"
+
+    assert sections_from_text(text) == []
+
+
+def test_the_fallback_runs_only_when_the_model_found_nothing():
+    """The model goes first because it handles prose that does not number
+    itself. This is the safety net, not the primary path."""
+    import httpx
+
+    from opportunity_agent import application_spec
+
+    def answered(request: httpx.Request) -> httpx.Response:
+        import json as _json
+        return httpx.Response(200, json={"message": {"content": _json.dumps({
+            "document_kind": "proposal",
+            "sections": [{"title": "A section the model found", "guidance": ""}],
+        })}})
+
+    spec = application_spec.extract_submission_spec(
+        STRUCTURED_CALL, client=httpx.Client(transport=httpx.MockTransport(answered)))
+
+    assert [s.title for s in spec.sections] == ["A section the model found"]
+
+
+def test_the_fallback_rescues_a_run_where_the_model_found_nothing():
+    import httpx
+
+    from opportunity_agent import application_spec
+
+    def empty(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"message": {"content": '{"sections": []}'}})
+
+    spec = application_spec.extract_submission_spec(
+        STRUCTURED_CALL, client=httpx.Client(transport=httpx.MockTransport(empty)))
+
+    assert len(spec.sections) == 5
+
+
+def test_the_letter_is_told_not_to_upgrade_what_the_evidence_says():
+    """A run turned "received training at the POTRAZ symposium" into
+    "organised the POTRAZ Researcher Symposium"."""
+    prompt = section_drafting.build_cover_letter_prompt(SPEC, OPP, "- Name: Isaiah")
+
+    assert "do not upgrade what it says" in prompt
+    assert "they did not organise it" in prompt
