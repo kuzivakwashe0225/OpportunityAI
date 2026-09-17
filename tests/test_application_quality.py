@@ -221,10 +221,14 @@ def test_the_letter_says_which_call_it_answers():
 
 
 def test_a_call_with_no_named_recipient_still_gets_a_letter():
+    """"Dear Selection Committee" asserts a committee exists. "Dear Sir or
+    Madam" asserts nothing, which is the right thing to say when the call
+    named nobody."""
     prompt = section_drafting.build_cover_letter_prompt(
         SubmissionSpec(), OPP, "- Name: Isaiah")
 
-    assert "selection committee" in prompt
+    assert "no recipient was named" in prompt
+    assert "Dear Sir or Madam" in prompt
 
 
 def test_the_letter_survives_the_model_being_unreachable():
@@ -422,3 +426,103 @@ def test_the_requirement_list_reaches_the_page():
 
     assert len(body["draft"]["requirements"]) == 2
     assert body["draft"]["form"]["filename"] == "form.docx"
+
+
+# --------------------------------------------------------------------------
+# 7. Not every section is about the applicant
+# --------------------------------------------------------------------------
+# The first run of the rewritten prompt put the whole CV in front of the model
+# and asked for a "Policy Problem Statement". It returned three paragraphs of
+# biography - reasonably, since the CV was the most concrete thing in the
+# prompt and nothing had said the section was not about him.
+
+@pytest.mark.parametrize("heading", [
+    "Title of the Proposed Policy Research", "Project Title", "Proposed Title",
+])
+def test_a_title_section_is_recognised_as_a_title(heading):
+    assert section_drafting.section_kind(heading) == "title"
+
+
+@pytest.mark.parametrize("heading", [
+    "Policy Problem Statement", "Background and Justification",
+    "Research Objectives", "Methodology", "Budget and Timeline",
+    "Expected Policy Outcomes", "Technical Proposal", "Risk management",
+])
+def test_an_analytical_section_is_not_about_the_applicant(heading):
+    assert section_drafting.section_kind(heading) == "analysis"
+
+
+@pytest.mark.parametrize("heading", [
+    "About you", "Personal statement", "Relevant experience",
+    "Company profile", "Key personnel", "Why do you deserve this award",
+    "Educational qualifications", "Track record",
+])
+def test_a_section_about_the_applicant_is_recognised(heading):
+    assert section_drafting.section_kind(heading) == "applicant"
+
+
+def test_an_unrecognised_heading_is_treated_as_analysis():
+    """The safer default. A section wrongly told to analyse still produces
+    content about the call's subject; one wrongly told to recite the CV
+    produces the biography this exists to stop."""
+    assert section_drafting.section_kind("Section 4(b)") == "analysis"
+
+
+def test_an_analytical_section_is_told_not_to_write_a_biography():
+    prompt = section_drafting.build_section_prompt(
+        SectionSpec(title="Policy Problem Statement"), SPEC, OPP, "- Name: Isaiah")
+
+    assert "NOT a biography" in prompt
+    assert "do not recite their CV" in prompt
+
+
+def test_a_section_about_the_applicant_asks_for_the_first_person():
+    prompt = section_drafting.build_section_prompt(
+        SectionSpec(title="Relevant experience"), SPEC, OPP, "- Name: Isaiah")
+
+    assert "IS about the applicant" in prompt
+    assert "first person" in prompt
+
+
+def test_a_title_section_is_given_a_one_line_budget():
+    """A title written to a 393-word budget is not a title."""
+    prompt = section_drafting.build_section_prompt(
+        SectionSpec(title="Title of the Proposed Policy Research"), SPEC, OPP,
+        "- Name: Isaiah", max_words=393)
+
+    assert "About 25 words" in prompt or "about 25 words" in prompt.lower()
+    assert "single line" in prompt
+
+
+def test_the_letter_is_told_not_to_use_bracketed_placeholders():
+    """The first real run produced "[To Whom It May Concern:]" - a placeholder
+    in brackets, in a letter meant to be sent."""
+    prompt = section_drafting.build_cover_letter_prompt(SPEC, OPP, "- Name: Isaiah")
+
+    assert "Never write a placeholder in brackets" in prompt
+    assert "[Your Name]" in prompt
+
+
+def test_an_email_address_is_not_used_as_a_salutation():
+    """POTRAZ gives research.development@potraz.zw. "Dear
+    research.development@potraz.zw," is not a letter opening."""
+    prompt = section_drafting.build_cover_letter_prompt(SPEC, OPP, "- Name: Isaiah")
+
+    assert "Dear Sir or Madam" in prompt
+    assert 'Dear research.development@potraz.zw' not in prompt
+
+
+def test_a_named_office_is_addressed_by_name():
+    spec = SubmissionSpec(submit_to="The Director of Research")
+
+    prompt = section_drafting.build_cover_letter_prompt(spec, OPP, "- Name: Isaiah")
+
+    assert "Dear The Director of Research," in prompt
+
+
+def test_the_model_is_told_to_spell_the_name_as_written():
+    """A real run rendered "Kuzivakwashe" as "Kuzivakwases"."""
+    prompt = section_drafting.build_section_prompt(
+        SectionSpec(title="Methodology"), SPEC, OPP, "- Name: Isaiah")
+
+    assert "exactly as it is spelled" in prompt

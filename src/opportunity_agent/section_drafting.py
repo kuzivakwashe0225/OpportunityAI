@@ -49,6 +49,83 @@ _DEFAULT_SECTION_WORDS = 220
 _MIN_SECTION_WORDS = 110
 _MAX_SECTION_WORDS = 600
 
+# What a section is actually asking for. Read off its heading, because the
+# heading is all a call gives you and it is nearly always enough.
+#
+# This exists because the first version of the rewritten prompt put the
+# applicant's whole CV in front of the model and asked for a "Policy Problem
+# Statement" - and got three paragraphs of biography. The model was doing the
+# reasonable thing with what it was given: the CV was the most concrete
+# material in the prompt, so it wrote about the CV. A section that asks what
+# is wrong with national ICT policy is not asking who the applicant is, and
+# nothing in the prompt had said so.
+_TITLE_HEADINGS = (
+    "title of", "title:", "proposed title", "project title", "research title",
+    "name of the proposed",
+)
+
+_ABOUT_THE_APPLICANT = (
+    "about you", "about the applicant", "personal statement", "personal details",
+    "biography", "profile", "experience", "work history", "employment",
+    "qualification", "education", "capability", "capacity", "track record",
+    "past performance", "references", "key personnel", "team", "motivation",
+    "why you", "why do you", "statement of purpose", "career", "skills",
+    "company profile", "organisational", "organizational",
+)
+
+_ANALYTICAL = (
+    "problem", "background", "justification", "rationale", "objective",
+    "aim", "question", "methodology", "method", "approach", "workplan",
+    "work plan", "timeline", "budget", "outcome", "impact", "deliverable",
+    "risk", "sustainability", "literature", "scope", "technical proposal",
+    "implementation", "monitoring", "evaluation", "dissemination",
+)
+
+
+def section_kind(title: str) -> str:
+    """One of "title", "applicant" or "analysis".
+
+    Deliberately keyword-based rather than a model call: it runs once per
+    section, it has to be predictable, and a heading is short enough that
+    keywords read it about as well as anything would. Anything unrecognised
+    is treated as analysis, which is the safer default - a section wrongly
+    told to analyse still produces content about the call's subject, while a
+    section wrongly told to recite the CV produces the biography this exists
+    to stop.
+    """
+    lowered = (title or "").strip().lower()
+    if any(word in lowered for word in _TITLE_HEADINGS) or lowered in ("title", "titles"):
+        return "title"
+    if any(word in lowered for word in _ABOUT_THE_APPLICANT):
+        return "applicant"
+    if any(word in lowered for word in _ANALYTICAL):
+        return "analysis"
+    return "analysis"
+
+
+_KIND_INSTRUCTIONS = {
+    "title": (
+        "This section is a TITLE. Write one single line - a specific, concrete "
+        "title for the work being proposed. No sentences, no paragraph, no "
+        "explanation, no biography. Just the title itself."
+    ),
+    "applicant": (
+        "This section IS about the applicant. Write it in the first person "
+        "(\"I\", or \"we\" for an organisation) and fill it with their real "
+        "specifics from the evidence - named projects, employers, "
+        "qualifications, dates, results."
+    ),
+    "analysis": (
+        "This section is NOT a biography. It asks about the subject matter, "
+        "not about the applicant. Write substantive content on the call's own "
+        "subject: the problem, the approach, the plan. You may refer to the "
+        "applicant's relevant experience in a single sentence where it "
+        "genuinely supports their ability to do this work - but do not list "
+        "their projects, do not recite their CV, and do not describe them in "
+        "the third person."
+    ),
+}
+
 _SECTION_PROMPT = """You are helping an applicant write one section of a \
 {document_kind}. Write it as they would write it about themselves: specific, \
 evidenced, and in the first person where the section is about them.
@@ -61,6 +138,7 @@ THE WHOLE APPLICATION MUST COVER THESE, IN ORDER:
 
 {written_so_far}YOU ARE WRITING SECTION {position}: {section_title}
 {section_guidance}
+{kind_instruction}
 
 EVERYTHING KNOWN ABOUT THE APPLICANT - the only source you may draw on:
 {profile_facts}
@@ -68,6 +146,8 @@ EVERYTHING KNOWN ABOUT THE APPLICANT - the only source you may draw on:
 How to write it:
 - Answer this section's question fully and directly. Do not restate the \
 question, and do not write an introduction to your answer.
+- Write the applicant's name exactly as it is spelled in the evidence, or \
+not at all.
 - Use the applicant's real specifics from the evidence above - actual project \
 names, employers, qualifications, dates, results. A sentence naming a real \
 project is worth a paragraph of "the applicant is passionate about".
@@ -96,9 +176,13 @@ EVERYTHING KNOWN ABOUT THE APPLICANT - the only source you may draw on:
 {profile_facts}
 
 How to write it:
-- Open by saying what is being applied for. Never open with "I am writing to \
-apply" followed by nothing - say which call, and why this applicant in \
-particular is answering it.
+- Open with a salutation on its own line, then say what is being applied \
+for. Do not open with "I am writing to apply for" - start with the call \
+itself, or with what the applicant brings to it.
+- Never write a placeholder in brackets. No "[To Whom It May Concern]", no \
+"[Your Name]", no "[insert date]". If you do not have something, leave it \
+out entirely.
+- Write the applicant's name exactly as it is spelled in the evidence.
 - Two or three short paragraphs of substance: the specific qualification, \
 project or contract that makes them a credible applicant for THIS call, named \
 exactly as it appears in their evidence.
@@ -263,6 +347,7 @@ def build_section_prompt(
     except StopIteration:
         position = 1
 
+    kind = section_kind(section.title)
     return _SECTION_PROMPT.format(
         document_kind=spec.document_kind or "application",
         title=getattr(opportunity, "title", "this opportunity"),
@@ -273,8 +358,10 @@ def build_section_prompt(
         section_title=section.title,
         section_guidance=(f"The call says this section should cover: {section.guidance}"
                           if section.guidance else ""),
+        kind_instruction=_KIND_INSTRUCTIONS[kind],
         profile_facts=facts,
-        max_words=max_words,
+        # A title is one line however many pages the call allows.
+        max_words=25 if kind == "title" else max_words,
     )
 
 
@@ -282,10 +369,19 @@ def build_cover_letter_prompt(
     spec: SubmissionSpec, opportunity, facts: str, max_words: int = 320
 ) -> str:
     submit_to = (spec.submit_to or "").strip()
-    addressee = (
-        f"ADDRESSED TO: {submit_to}" if submit_to
-        else "ADDRESSED TO: the selection committee (no named recipient was given)"
-    )
+    if submit_to and "@" not in submit_to:
+        # A named office or person: address them.
+        addressee = f'ADDRESSED TO: {submit_to}. Open with "Dear {submit_to},".'
+    elif submit_to:
+        # Only an email address, which is not a salutation.
+        addressee = (
+            f"SUBMITTED TO: {submit_to} (an email address, not a person - open "
+            'with "Dear Sir or Madam," and mention the address only at the end '
+            "if at all)."
+        )
+    else:
+        addressee = 'ADDRESSED TO: no recipient was named. Open with "Dear Sir or Madam,".'
+
     return _COVER_LETTER_PROMPT.format(
         title=getattr(opportunity, "title", "this opportunity"),
         call_context=_call_context(spec, opportunity),
