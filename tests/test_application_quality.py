@@ -467,12 +467,15 @@ def test_an_unrecognised_heading_is_treated_as_analysis():
     assert section_drafting.section_kind("Section 4(b)") == "analysis"
 
 
-def test_an_analytical_section_is_told_not_to_write_a_biography():
+def test_an_analytical_section_is_pointed_at_the_subject_not_the_person():
+    """The wording moved from "this is NOT a biography" to a positive
+    instruction plus a flat prohibition on describing work it was never
+    given - the phrasing that stopped it inventing one."""
     prompt = section_drafting.build_section_prompt(
         SectionSpec(title="Policy Problem Statement"), SPEC, OPP, "- Name: Isaiah")
 
-    assert "NOT a biography" in prompt
-    assert "do not recite their CV" in prompt
+    assert "asks about the subject matter, not about the applicant" in prompt
+    assert "Do not describe something they built" in prompt
 
 
 def test_a_section_about_the_applicant_asks_for_the_first_person():
@@ -612,3 +615,61 @@ def test_the_letter_is_given_an_opening_to_copy_not_one_to_avoid():
 
     assert "I should like to be considered for" in prompt
     assert "line 1: the salutation" in prompt
+
+
+# --------------------------------------------------------------------------
+# 9. An analysis section must not invent the experience it was not given
+# --------------------------------------------------------------------------
+# The fourth real run produced, under "Policy Problem Statement":
+#
+#   Chikeya's work includes a project titled "Enhancing Network Security
+#   through AI," where he developed an AI-based intrusion detection system
+#   that significantly outperformed traditional methods.
+#
+# No such project exists. Checked against the live database: neither the
+# project nor the result appears anywhere in his CV. The prompt had said the
+# section "may refer to the applicant's relevant experience in a single
+# sentence" - while giving it only a one-line capability summary. That is an
+# invitation to invent the experience, and it accepted.
+
+def test_an_analysis_section_is_told_it_has_not_been_given_the_projects():
+    prompt = section_drafting.build_section_prompt(
+        SectionSpec(title="Policy Problem Statement"), SPEC, OPP,
+        "- The applicant: Isaiah, works in computer systems engineering")
+
+    assert "have NOT been given the applicant's projects" in prompt
+    assert "Do not name a project" in prompt
+
+
+def test_an_analysis_section_no_longer_invites_citing_experience():
+    """The permission was the hole. It is gone."""
+    prompt = section_drafting.build_section_prompt(
+        SectionSpec(title="Methodology"), SPEC, OPP, "- The applicant: Isaiah")
+
+    assert "may refer to the applicant's relevant experience" not in prompt
+
+
+def test_a_section_about_the_applicant_still_wants_the_specifics():
+    """The restriction belongs to analysis sections only - a personal
+    statement with no named projects is a worse personal statement."""
+    prompt = section_drafting.build_section_prompt(
+        SectionSpec(title="Relevant experience"), SPEC, OPP, "- Name: Isaiah")
+
+    assert "named projects" in prompt
+    assert "Do not name a project" not in prompt
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("the **POTRAZ Call for Proposals 2026**.", "the POTRAZ Call for Proposals 2026."),
+    ("a *single* emphasis", "a single emphasis"),
+    ("**Bold** and *italic* together", "Bold and italic together"),
+])
+def test_markdown_never_reaches_the_word_document(raw, expected):
+    """A real covering letter went out with "the **POTRAZ ... Call**" in it."""
+    assert section_drafting.strip_leaked_heading(raw, "Covering letter") == expected
+
+
+def test_arithmetic_asterisks_are_left_alone():
+    body = "The budget is 3 * 450 words in total."
+
+    assert section_drafting.strip_leaked_heading(body, "Budget") == body

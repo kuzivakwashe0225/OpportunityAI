@@ -24,6 +24,8 @@ guarantee where it still applies:
 
 from __future__ import annotations
 
+import re
+
 import httpx
 
 from .application_spec import SectionSpec, SubmissionSpec
@@ -116,13 +118,17 @@ _KIND_INSTRUCTIONS = {
         "qualifications, dates, results."
     ),
     "analysis": (
-        "This section is NOT a biography. It asks about the subject matter, "
-        "not about the applicant. Write substantive content on the call's own "
-        "subject: the problem, the approach, the plan. You may refer to the "
-        "applicant's relevant experience in a single sentence where it "
-        "genuinely supports their ability to do this work - but do not list "
-        "their projects, do not recite their CV, and do not describe them in "
-        "the third person."
+        "This section asks about the subject matter, not about the applicant. "
+        "Write substantive content on the call's own subject: the problem, "
+        "the approach, the plan.\n"
+        "  You have NOT been given the applicant's projects, employers, "
+        "results or publications, and you must not describe any. Do not name "
+        "a project. Do not describe something they built, ran or achieved. "
+        "Do not attribute a finding to them. If you find yourself writing "
+        "their name followed by what they did, stop and write about the "
+        "subject instead.\n"
+        "  Naming their field or qualification is fine; anything more "
+        "specific than that would be invented."
     ),
 }
 
@@ -296,10 +302,13 @@ def strip_leaked_heading(body: str, section_title: str) -> str:
     )
     if looks_like_heading:
         lines = lines[1:]
-    # Markdown emphasis in a Word document is noise, not formatting.
+    # Markdown in a Word document is noise, not formatting. A real run put
+    # "the **POTRAZ Call for Research Proposals 2026**" in a covering letter.
     cleaned = "\n".join(lines).strip()
     for marker in ("### ", "## ", "# "):
         cleaned = cleaned.replace(marker, "")
+    cleaned = re.sub(r"\*\*(.+?)\*\*", r"\1", cleaned, flags=re.S)
+    cleaned = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"\1", cleaned, flags=re.S)
     return cleaned.strip()
 
 
