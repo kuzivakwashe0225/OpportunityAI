@@ -419,12 +419,29 @@ def build_cover_letter_prompt(
     )
 
 
+# One retry, no more. Empty answers do happen - a small model under memory
+# pressure returns nothing, and a request can time out while another model is
+# being swapped in - and a blank section in a finished application is a bad
+# outcome the owner has to notice and fix. Two attempts costs at most one
+# extra minute; three would double the time of a nine-section proposal for
+# very little more.
+_ATTEMPTS = 2
+
+
 def _ask(prompt: str, *, base_url: str, model: str, client: httpx.Client | None) -> str:
-    """One model call, or "" if anything at all goes wrong.
+    """One model call, retried once if it comes back empty.
 
     Never raises. Losing a whole nine-section package because section six
     timed out would be far worse than one empty section the owner fills in.
     """
+    for attempt in range(_ATTEMPTS):
+        answer = _ask_once(prompt, base_url=base_url, model=model, client=client)
+        if answer:
+            return answer
+    return ""
+
+
+def _ask_once(prompt: str, *, base_url: str, model: str, client: httpx.Client | None) -> str:
     owns_client = client is None
     http_client = client or httpx.Client(timeout=_TIMEOUT_SECONDS)
     try:
