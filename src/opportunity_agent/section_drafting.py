@@ -322,10 +322,17 @@ def strip_leaked_heading(body: str, section_title: str) -> str:
         return ""
     lines = text.split("\n")
     first = lines[0].strip()
+    # "4. Methodology" is the call's own numbering plus the section title,
+    # which the exported document then numbers again. A real run opened with
+    # exactly that.
+    numbered = re.match(r"^\(?(?:\d{1,2}|[ivx]{1,4}|[a-z])[\.\)]\s*(.{0,90})$", first, re.I)
+    bare = first.rstrip(":").strip().lower()
+    target = (section_title or "").strip().lower()
     looks_like_heading = (
         first.startswith("#")
-        or (first.rstrip(":").strip().lower() == (section_title or "").strip().lower())
+        or bare == target
         or (first.startswith("**") and first.endswith("**") and len(first) < 120)
+        or bool(numbered and numbered.group(1).rstrip(":").strip().lower() == target)
     )
     if looks_like_heading:
         lines = lines[1:]

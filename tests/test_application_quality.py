@@ -833,3 +833,24 @@ def test_the_letter_is_told_not_to_upgrade_what_the_evidence_says():
 
     assert "do not upgrade what it says" in prompt
     assert "they did not organise it" in prompt
+
+
+@pytest.mark.parametrize("raw", [
+    "4. Methodology\nThis research will use a mixed-methods approach.",
+    "(4) Methodology\nThis research will use a mixed-methods approach.",
+    "iv. Methodology\nThis research will use a mixed-methods approach.",
+])
+def test_a_numbered_heading_is_stripped_too(raw):
+    """A run opened the Methodology with "4. Methodology" - the call's own
+    numbering, which the exported document then numbers again."""
+    cleaned = section_drafting.strip_leaked_heading(raw, "Methodology")
+
+    assert cleaned == "This research will use a mixed-methods approach."
+
+
+def test_a_numbered_list_that_is_the_answer_is_not_stripped():
+    """A section whose answer genuinely begins with a numbered point keeps
+    it - only a repeat of this section's own title goes."""
+    raw = "1. Reduce response times by half.\n2. Publish an annual report."
+
+    assert section_drafting.strip_leaked_heading(raw, "Research Objectives") == raw
