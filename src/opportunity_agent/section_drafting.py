@@ -121,14 +121,14 @@ _KIND_INSTRUCTIONS = {
         "This section asks about the subject matter, not about the applicant. "
         "Write substantive content on the call's own subject: the problem, "
         "the approach, the plan.\n"
-        "  You have NOT been given the applicant's projects, employers, "
-        "results or publications, and you must not describe any. Do not name "
-        "a project. Do not describe something they built, ran or achieved. "
-        "Do not attribute a finding to them. If you find yourself writing "
-        "their name followed by what they did, stop and write about the "
-        "subject instead.\n"
-        "  Naming their field or qualification is fine; anything more "
-        "specific than that would be invented."
+        "  Write about the work in the first person future - \"I will\", "
+        "\"this research will\" - describing what is proposed.\n"
+        "  Say NOTHING about the applicant's history. Do not name them. Do "
+        "not mention an employer, a qualification, a past project or a past "
+        "result. You have not been told any of those and anything you write "
+        "about them would be invented. If a sentence starts to describe who "
+        "the applicant is or what they have done, delete it and write about "
+        "the proposed work instead."
     ),
 }
 
@@ -281,6 +281,33 @@ def words_for_each_section(spec, section_count: int) -> int:
     except (TypeError, ValueError):
         return _DEFAULT_SECTION_WORDS
     return max(_MIN_SECTION_WORDS, min(_MAX_SECTION_WORDS, int(total / section_count)))
+
+
+def strip_echoed_guidance(body: str, guidance: str) -> str:
+    """Drop an opening sentence that is just the call's instruction repeated.
+
+    A real run opened a Policy Problem Statement with "Present a brief
+    overview of the problem in the ICT policy area that your research will
+    address." - which is what the call asked for, not an answer to it. The
+    prompt already says not to restate the question; this removes it when the
+    model does so anyway.
+    """
+    text = (body or "").strip()
+    guide = " ".join((guidance or "").split()).strip().lower().rstrip(".")
+    if not text or len(guide) < 15:
+        return text
+    first, _, rest = text.partition(".")
+    if " ".join(first.split()).lower().strip().rstrip(".") == guide and rest.strip():
+        return rest.strip()
+    # Also catch a near-match: the model often reproduces the guidance with a
+    # word changed, which a strict comparison misses.
+    words_first = set(" ".join(first.split()).lower().split())
+    words_guide = set(guide.split())
+    if words_guide and rest.strip() and len(words_guide) >= 6:
+        overlap = len(words_first & words_guide) / len(words_guide)
+        if overlap > 0.8:
+            return rest.strip()
+    return text
 
 
 def strip_leaked_heading(body: str, section_title: str) -> str:
@@ -504,6 +531,7 @@ def draft_section(
     answer = strip_leaked_heading(
         _ask(prompt, base_url=base_url, model=model, client=client), section.title
     )
+    answer = strip_echoed_guidance(answer, section.guidance)
     if section_kind(section.title) == "title":
         # One line means one line. A small model asked for a title will often
         # add an explanation underneath it, and the first line is the title.

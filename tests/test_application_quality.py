@@ -475,7 +475,7 @@ def test_an_analytical_section_is_pointed_at_the_subject_not_the_person():
         SectionSpec(title="Policy Problem Statement"), SPEC, OPP, "- Name: Isaiah")
 
     assert "asks about the subject matter, not about the applicant" in prompt
-    assert "Do not describe something they built" in prompt
+    assert "Say NOTHING about the applicant's history" in prompt
 
 
 def test_a_section_about_the_applicant_asks_for_the_first_person():
@@ -555,13 +555,35 @@ def test_a_section_about_the_applicant_is_shown_everything():
     assert "Remote Prepaid Water Meter" in seen
 
 
-def test_an_analytical_section_still_knows_who_is_writing():
-    """It has to write in the right voice and may claim competence in one
-    sentence, so it gets a line rather than nothing."""
+def test_an_analytical_section_is_told_nothing_about_the_applicant():
+    """Three attempts to get this right, each one looser than this:
+
+    the whole dossier produced a biography under "Policy Problem Statement";
+    a one-line capability summary stopped the recitation and started
+    embellishment - "his work has focused on developing machine learning
+    models for anomaly detection in network traffic data", which is nowhere
+    in his file; so now it is told nothing.
+
+    A small model given a fact about a person elaborates on it. The only
+    reliable way to stop that is to give it no fact to elaborate on, and an
+    analysis section does not need to know who is writing.
+    """
     seen = evidence.for_section_kind("analysis", _Profile(), [_Doc("cv", CV)])
 
-    assert "Isaiah Kuzivakwashe Chikeya" in seen
-    assert "computer systems engineering" in seen
+    assert "Isaiah" not in seen
+    assert "Harare Institute of Technology" not in seen
+    assert "BSc" not in seen
+    assert "told nothing about the applicant" in seen
+
+
+def test_an_analysis_prompt_asks_for_proposed_work_in_the_first_person():
+    """It still has to read like an application, not a textbook."""
+    prompt = section_drafting.build_section_prompt(
+        SectionSpec(title="Methodology"), SPEC, OPP,
+        evidence.for_section_kind("analysis", _Profile(), []))
+
+    assert "first person future" in prompt
+    assert "Say NOTHING about the applicant's history" in prompt
 
 
 def test_a_title_is_not_shown_the_cv_either():
@@ -573,10 +595,37 @@ def test_a_title_is_not_shown_the_cv_either():
 
 
 def test_the_capability_line_holds_up_with_an_empty_profile():
+    """Still used by nothing in the draft path, but kept and covered: it is
+    the right shape for a future caller that wants a one-liner."""
     class Empty:
         pass
 
     assert "not filled in" in evidence.capability_line(Empty())
+
+
+def test_guidance_repeated_back_as_an_answer_is_removed():
+    """A run opened a Policy Problem Statement by restating the call's own
+    instruction: "Present a brief overview of the problem in the ICT policy
+    area that your research will address"."""
+    body = ("Present a brief overview of the problem your research addresses. "
+            "Zimbabwe's ICT rules are fragmented across four agencies.")
+
+    cleaned = section_drafting.strip_echoed_guidance(
+        body, "Present a brief overview of the problem your research addresses")
+
+    assert cleaned.startswith("Zimbabwe's ICT rules")
+
+
+def test_a_real_opening_sentence_is_never_removed():
+    body = "Zimbabwe's ICT rules are fragmented across four agencies."
+
+    assert section_drafting.strip_echoed_guidance(body, "the challenge") == body
+
+
+def test_nothing_is_removed_when_the_guidance_is_too_short_to_match_on():
+    body = "The challenge here is fragmentation."
+
+    assert section_drafting.strip_echoed_guidance(body, "the challenge") == body
 
 
 def test_a_title_gets_its_own_prompt_not_the_prose_one():
@@ -632,13 +681,13 @@ def test_the_letter_is_given_an_opening_to_copy_not_one_to_avoid():
 # sentence" - while giving it only a one-line capability summary. That is an
 # invitation to invent the experience, and it accepted.
 
-def test_an_analysis_section_is_told_it_has_not_been_given_the_projects():
+def test_an_analysis_section_is_told_it_knows_nothing_about_the_applicant():
     prompt = section_drafting.build_section_prompt(
         SectionSpec(title="Policy Problem Statement"), SPEC, OPP,
-        "- The applicant: Isaiah, works in computer systems engineering")
+        evidence.for_section_kind("analysis", _Profile(), []))
 
-    assert "have NOT been given the applicant's projects" in prompt
-    assert "Do not name a project" in prompt
+    assert "Do not name them" in prompt
+    assert "would be invented" in prompt
 
 
 def test_an_analysis_section_no_longer_invites_citing_experience():

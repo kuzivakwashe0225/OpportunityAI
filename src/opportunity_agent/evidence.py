@@ -207,4 +207,26 @@ def for_section_kind(kind: str, profile, documents=()) -> str:
     """
     if kind == "applicant":
         return dossier(profile, documents)
-    return capability_line(profile)
+    if kind == "title":
+        # A title needs the subject, not the person. Given a name it puts the
+        # name in the title, which it did: "Isaiah Kuzivakwase ChikeyaAI
+        # Research & Development".
+        return "(Write about the work, not about who is proposing it.)"
+    # Nothing at all.
+    #
+    # This started as the whole dossier, which produced three paragraphs of
+    # biography under "Policy Problem Statement". Cutting it to a one-line
+    # capability summary stopped the recitation and started something worse:
+    # the model embellished the one line into specific claims - "his work has
+    # focused on developing machine learning models for anomaly detection in
+    # network traffic data" - none of which was anywhere in his file.
+    #
+    # A small model given a fact about a person will elaborate on it. The only
+    # reliable way to stop that is to give it no fact to elaborate on. An
+    # analysis section is about the subject and does not need to know who is
+    # writing; the sections that do are handled above.
+    return (
+        "(You have been told nothing about the applicant, deliberately. Make "
+        "no claim about their history, employers, qualifications or past "
+        "results - you do not know any of them.)"
+    )
