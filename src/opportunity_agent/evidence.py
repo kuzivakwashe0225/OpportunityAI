@@ -165,3 +165,46 @@ def has_real_evidence(documents=()) -> bool:
     system cannot write.
     """
     return any((getattr(d, "extracted_text", None) or "").strip() for d in documents)
+
+
+def capability_line(profile) -> str:
+    """One line: who is writing, and what they are qualified in.
+
+    Used for the sections that are not about the applicant. They need enough
+    to write in the right voice and to claim competence in a single sentence,
+    and nothing more - the moment a CV is in the prompt, a small model writes
+    about the CV.
+    """
+    bits = []
+    name = getattr(profile, "name", None)
+    if name:
+        bits.append(str(name).strip())
+    field = getattr(profile, "field", None)
+    if field:
+        bits.append(f"works in {field}")
+    certificates = getattr(profile, "certificates", None) or []
+    if certificates:
+        bits.append(f"holds {certificates[0]}")
+    work = getattr(profile, "work_history", None) or []
+    if work:
+        bits.append(f"currently {work[0]}")
+    if not bits:
+        return "- (the applicant has not filled in their profile)"
+    return "- The applicant: " + ", ".join(bits) + "."
+
+
+def for_section_kind(kind: str, profile, documents=()) -> str:
+    """The evidence appropriate to one kind of section.
+
+    * applicant - everything. The section is about them, so their CV is the
+      point.
+    * title - the one line, because a title is about the work, not the person,
+      and a model handed a CV will put a name in the title. It did exactly
+      that: "Isaiah Kuzivakwase ChikeyaAI Research & Development".
+    * analysis - the one line. The section asks about the subject, and giving
+      it the CV is what produced a biography under the heading "Policy Problem
+      Statement".
+    """
+    if kind == "applicant":
+        return dossier(profile, documents)
+    return capability_line(profile)

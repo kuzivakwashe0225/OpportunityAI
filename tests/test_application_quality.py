@@ -217,7 +217,6 @@ def test_the_letter_says_which_call_it_answers():
     prompt = section_drafting.build_cover_letter_prompt(SPEC, OPP, "- Name: Isaiah")
 
     assert "POTRAZ Call for Research Proposals" in prompt
-    assert "I am writing to apply" in prompt  # named as the thing to avoid
 
 
 def test_a_call_with_no_named_recipient_still_gets_a_letter():
@@ -484,14 +483,15 @@ def test_a_section_about_the_applicant_asks_for_the_first_person():
     assert "first person" in prompt
 
 
-def test_a_title_section_is_given_a_one_line_budget():
-    """A title written to a 393-word budget is not a title."""
+def test_a_title_section_is_asked_for_one_line_whatever_the_page_budget():
+    """A title written to a 393-word budget is not a title, so a title does
+    not go through the prose prompt at all."""
     prompt = section_drafting.build_section_prompt(
         SectionSpec(title="Title of the Proposed Policy Research"), SPEC, OPP,
         "- Name: Isaiah", max_words=393)
 
-    assert "About 25 words" in prompt or "about 25 words" in prompt.lower()
-    assert "single line" in prompt
+    assert "Output exactly one line" in prompt
+    assert "393" not in prompt
 
 
 def test_the_letter_is_told_not_to_use_bracketed_placeholders():
@@ -526,3 +526,89 @@ def test_the_model_is_told_to_spell_the_name_as_written():
         SectionSpec(title="Methodology"), SPEC, OPP, "- Name: Isaiah")
 
     assert "exactly as it is spelled" in prompt
+
+
+# --------------------------------------------------------------------------
+# 8. Each section sees only the evidence it should write from
+# --------------------------------------------------------------------------
+# The decisive fix. Section 7 told the model "this section is NOT a
+# biography"; it wrote one anyway, because the CV was still the most concrete
+# material in the prompt. A small model writes about what it is shown, so the
+# CV is taken out of prompts that should not produce biography.
+
+def test_an_analytical_section_is_not_shown_the_cv_at_all():
+    """Not "told not to use it" - not shown it. There is then nothing to
+    recite under the heading "Policy Problem Statement"."""
+    seen = evidence.for_section_kind("analysis", _Profile(), [_Doc("cv", CV)])
+
+    assert "Chord Catcher" not in seen
+    assert "Tetisol" not in seen
+
+
+def test_a_section_about_the_applicant_is_shown_everything():
+    seen = evidence.for_section_kind("applicant", _Profile(), [_Doc("cv", CV)])
+
+    assert "Chord Catcher" in seen
+    assert "Remote Prepaid Water Meter" in seen
+
+
+def test_an_analytical_section_still_knows_who_is_writing():
+    """It has to write in the right voice and may claim competence in one
+    sentence, so it gets a line rather than nothing."""
+    seen = evidence.for_section_kind("analysis", _Profile(), [_Doc("cv", CV)])
+
+    assert "Isaiah Kuzivakwashe Chikeya" in seen
+    assert "computer systems engineering" in seen
+
+
+def test_a_title_is_not_shown_the_cv_either():
+    """A model handed a CV puts the applicant's name in the title. It did:
+    "Isaiah Kuzivakwase ChikeyaAI Research & Development"."""
+    seen = evidence.for_section_kind("title", _Profile(), [_Doc("cv", CV)])
+
+    assert "Chord Catcher" not in seen
+
+
+def test_the_capability_line_holds_up_with_an_empty_profile():
+    class Empty:
+        pass
+
+    assert "not filled in" in evidence.capability_line(Empty())
+
+
+def test_a_title_gets_its_own_prompt_not_the_prose_one():
+    prompt = section_drafting.build_section_prompt(
+        SectionSpec(title="Title of the Proposed Policy Research"), SPEC, OPP,
+        "- The applicant: Isaiah")
+
+    assert "Output exactly one line" in prompt
+    assert "no heading, no title, no markdown" not in prompt
+
+
+def test_only_the_first_line_of_a_title_is_kept():
+    """A small model asked for a title often adds an explanation underneath."""
+    class _Stub:
+        def post(self, *a, **k):
+            class R:
+                status_code = 200
+                def raise_for_status(self): pass
+                def json(self):
+                    return {"message": {"content":
+                            'Regulating AI in Mobile Money\n\nThis title covers...'}}
+            return R()
+        def close(self): pass
+
+    answer = section_drafting.draft_section(
+        SectionSpec(title="Project Title"), SPEC, OPP, "- The applicant: Isaiah",
+        client=_Stub())
+
+    assert answer == "Regulating AI in Mobile Money"
+
+
+def test_the_letter_is_given_an_opening_to_copy_not_one_to_avoid():
+    """Two runs opened "I am writing to apply for" after being told not to.
+    A small model follows a pattern far better than a prohibition."""
+    prompt = section_drafting.build_cover_letter_prompt(SPEC, OPP, "- Name: Isaiah")
+
+    assert "I should like to be considered for" in prompt
+    assert "line 1: the salutation" in prompt

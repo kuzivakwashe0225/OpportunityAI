@@ -1789,8 +1789,29 @@ def _build_full_draft(
             # A form field wants a line, not an essay: "Full name" answered in
             # 175 words is not an answer, it is a problem.
             words = 40 if requirement["kind"] == "form_field" else budget
+
+            # Each section sees only the evidence it should be writing from.
+            # Telling a small model "this section is not a biography" does not
+            # work - it was told exactly that and wrote one anyway, because
+            # the CV was still the most concrete material in the prompt.
+            # Removing the CV from an analytical prompt is what actually
+            # stops it: there is then nothing to recite.
+            kind = section_drafting_module.section_kind(section.title)
+            if requirement["kind"] == "form_field":
+                # A form asks for the applicant's own details. This is the one
+                # place the whole CV is exactly the right thing to have.
+                section_evidence = dossier
+            else:
+                section_evidence = evidence_module.for_section_kind(
+                    kind, subject, list(profile.documents))
+                if steer and kind != "title":
+                    section_evidence += (
+                        "\n\nWhat the applicant wants this application to "
+                        "emphasise: " + steer
+                    )
+
             body = section_drafting_module.draft_section(
-                section, spec, opp, dossier,
+                section, spec, opp, section_evidence,
                 all_sections=as_sections, written=sections, max_words=words,
                 **settings,
             )

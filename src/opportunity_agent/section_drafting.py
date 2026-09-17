@@ -164,6 +164,23 @@ sign-off, no note about being an AI.
 
 Write it now:"""
 
+_TITLE_PROMPT = """Propose a title for a {document_kind} answering this call.
+
+THE CALL: {title}
+{call_context}
+
+THE PROPOSAL WILL COVER:
+{all_sections}
+
+{profile_facts}
+
+Output exactly one line: the title itself. A specific, concrete title naming \
+the subject and the approach - for example "Regulating AI-Assisted Fraud \
+Detection in Zimbabwe's Mobile Money Sector". No name, no quotation marks, no \
+label, no explanation, nothing before or after it.
+
+The title:"""
+
 _COVER_LETTER_PROMPT = """Write a covering letter for this application, in the \
 applicant's own voice.
 
@@ -176,9 +193,12 @@ EVERYTHING KNOWN ABOUT THE APPLICANT - the only source you may draw on:
 {profile_facts}
 
 How to write it:
-- Open with a salutation on its own line, then say what is being applied \
-for. Do not open with "I am writing to apply for" - start with the call \
-itself, or with what the applicant brings to it.
+- Structure it exactly like this, and do not deviate:
+  line 1: the salutation.
+  line 2 onwards: a first sentence of the form "I should like to be \
+considered for <the call>." or "I am submitting a proposal for <the call>."
+  then two or three paragraphs of substance.
+  then a closing line and the applicant's name.
 - Never write a placeholder in brackets. No "[To Whom It May Concern]", no \
 "[Your Name]", no "[insert date]". If you do not have something, leave it \
 out entirely.
@@ -348,6 +368,14 @@ def build_section_prompt(
         position = 1
 
     kind = section_kind(section.title)
+    if kind == "title":
+        return _TITLE_PROMPT.format(
+            document_kind=spec.document_kind or "application",
+            title=getattr(opportunity, "title", "this opportunity"),
+            call_context=_call_context(spec, opportunity),
+            all_sections=titles,
+            profile_facts=facts,
+        )
     return _SECTION_PROMPT.format(
         document_kind=spec.document_kind or "application",
         title=getattr(opportunity, "title", "this opportunity"),
@@ -447,9 +475,14 @@ def draft_section(
         section, spec, opportunity, facts, budget,
         all_sections=sections, written=written,
     )
-    return strip_leaked_heading(
+    answer = strip_leaked_heading(
         _ask(prompt, base_url=base_url, model=model, client=client), section.title
     )
+    if section_kind(section.title) == "title":
+        # One line means one line. A small model asked for a title will often
+        # add an explanation underneath it, and the first line is the title.
+        answer = answer.split("\n")[0].strip().strip('"').strip()
+    return answer
 
 
 def draft_cover_letter(
