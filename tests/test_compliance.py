@@ -6,10 +6,20 @@ page says 25000. Inventing a plausible-sounding requirement would be worse
 than saying nothing, because the owner would go and act on it.
 """
 
-from datetime import date
+from datetime import date, timedelta
 
 from opportunity_agent import compliance, egp
 from opportunity_agent.models import Opportunity
+
+
+# Far enough ahead that this file does not start failing on a particular
+# morning. It did: the deadline was written as a fixed date, that date
+# arrived, and a test about PRAZ category matching began failing with "This
+# closed on 2026-09-17" - nothing to do with what it was testing.
+#
+# Tests that care about a closing date pass `as_of` and their own deadline, so
+# they are unaffected by this and stay deterministic.
+OPEN_DEADLINE = date.today() + timedelta(days=90)
 
 
 def make_tender_opportunity(**overrides) -> Opportunity:
@@ -17,7 +27,7 @@ def make_tender_opportunity(**overrides) -> Opportunity:
         "source": "PRAZ eGP",
         "title": "Supply of transformers",
         "url": "https://egp.praz.org.zw/Indexes/viewLiveTenderDetails/46190",
-        "deadline": date(2026, 9, 17),
+        "deadline": OPEN_DEADLINE,
         "eligible_countries": ["Zimbabwe"],
         "required_categories": ["GE001"],
         "required_documents": list(egp.STANDARD_ZW_TENDER_DOCUMENTS),

@@ -315,6 +315,8 @@
     font-size:.7rem;font-weight:700;color:#fff;background:var(--ink-soft);}
   .doc-mark.held{background:#1c7c4a;}
   .doc-mark.needed{background:#b23c17;}
+  .doc-mark.unread{background:#8a6d1f;}
+  .warnish{color:#8a6d1f;}
   .advice{margin:12px 0 0;padding:12px 14px;border-left:3px solid var(--accent);background:var(--accent-soft);
     border-radius:0 6px 6px 0;}
   .advice ul{margin:6px 0 0;padding-left:18px;}
@@ -966,7 +968,7 @@
         ":</strong> "+esc(reasons.join("; "))+"</p>" : "")+
       (o.awarded_to ? "" : complianceAdvice(o.compliance))+
       "<div class='opp-actions'>"+actions.join("")+"</div>"+
-      "<div class='package'>"+(o.package?renderPackage(o.package):"")+"</div>"+
+      "<div class='package'>"+(o.package?renderPackage(o.package, o.id):"")+"</div>"+
       "<div class='opp-history'></div></article>";
   }
 
@@ -990,15 +992,58 @@
   function btn(action,label,cls){
     return "<button type='button' class='"+cls+"' data-act='"+action+"'>"+esc(label)+"</button>";
   }
-  function renderPackage(pkg){
-    var checklist=(pkg.checklist||[]).map(function(i){
-      return "<li><strong>"+esc(i.status)+"</strong>: "+esc(i.requirement)+"</li>";}).join("");
-    var warnings=(pkg.warnings||[]).length
-      ? (pkg.warnings).map(function(w){return "<li>"+esc(w)+"</li>";}).join("")
-      : "<li>None</li>";
-    return "<strong>Requirement checklist</strong><ul>"+checklist+"</ul>"+
-      "<strong>Draft cover note</strong><pre>"+esc(pkg.cover_note||"")+"</pre>"+
-      "<strong>Warnings</strong><ul>"+warnings+"</ul>";
+  // A summary of the application, with the detail page as the place to read
+  // and edit it.
+  //
+  // This used to render checklist / cover_note / warnings - the shape the old
+  // template-built package had. A drafted application now carries
+  // requirements, answered sections and a covering letter and no cover_note
+  // at all, so for every newly drafted opportunity this panel came up blank:
+  // an empty checklist, an empty <pre>, and "Warnings: None".
+  //
+  // It reads both shapes now, because the older packages are still in the
+  // database and are still worth showing.
+  function renderPackage(pkg, id){
+    var bits = [];
+
+    var answered = (pkg.sections||[]).filter(function(s){ return (s.body||"").trim(); }).length;
+    var total = (pkg.sections||[]).length || pkg.section_count || 0;
+    if(total){
+      bits.push("<strong>"+answered+" of "+total+" requirements answered</strong>");
+    }
+    if(pkg.cover_letter){
+      bits.push("<strong>Covering letter</strong><pre>"+
+        esc(pkg.cover_letter.slice(0,600))+
+        (pkg.cover_letter.length>600?"\u2026":"")+"</pre>");
+    }
+    if(pkg.form && pkg.form.filename){
+      bits.push("<strong>Form to complete:</strong> "+esc(pkg.form.filename));
+    }
+
+    // The older shape, still in the database for anything drafted before the
+    // rewrite.
+    if((pkg.checklist||[]).length){
+      bits.push("<strong>Requirement checklist</strong><ul>"+
+        pkg.checklist.map(function(i){
+          return "<li><strong>"+esc(i.status)+"</strong>: "+esc(i.requirement)+"</li>";
+        }).join("")+"</ul>");
+    }
+    if(pkg.cover_note){
+      bits.push("<strong>Draft cover note</strong><pre>"+esc(pkg.cover_note)+"</pre>");
+    }
+    if((pkg.warnings||[]).length){
+      bits.push("<strong>Warnings</strong><ul>"+
+        pkg.warnings.map(function(w){return "<li>"+esc(w)+"</li>";}).join("")+"</ul>");
+    }
+
+    if(!bits.length){
+      bits.push("<span class='muted'>Nothing drafted yet.</span>");
+    }
+    if(id){
+      bits.push("<p style='margin:12px 0 0;'><a class='btn small' href='#/opportunity/"+
+        encodeURIComponent(id)+"'>Open to read and edit</a></p>");
+    }
+    return bits.join("");
   }
 
   function wireOppCards(){
@@ -1239,6 +1284,11 @@
             "off this listing.</strong><p style='margin:6px 0 0;font-size:.86rem;'>That "+
             "usually means the detail is in an attached document rather than the page. "+
             "Try again, or say below what it should cover.</p></div>"
+          : status==="failed"
+          ? "<div class='advice blocked'><strong>The last attempt failed.</strong>"+
+            "<p style='margin:6px 0 0;font-size:.86rem;'>Something went wrong while "+
+            "writing this — the model may have been unreachable. Nothing was lost; "+
+            "try again.</p></div>"
           : "")+
         "<label class='steer'>Anything it should emphasise? <span class='muted'>(optional)</span>"+
           "<textarea id='draft-steer' rows='2' placeholder='e.g. focus on our rural "+
@@ -1486,16 +1536,36 @@
     var byType = {};
     docs.forEach(function(d){ (byType[d.doc_type] = byType[d.doc_type] || []).push(d); });
 
+    // A file we could not read is not the same as a file we have. It still
+    // satisfies "did you attach it", and it contributes nothing to a draft,
+    // because there are no words in it to quote. Showing both the same green
+    // tick told the owner everything was fine while their application was
+    // being written without their transcript.
+    function unreadable(list){
+      return list.filter(function(d){ return d.extraction_status !== "extracted"; });
+    }
+
     var slots = schema.documents.map(function(kind){
       var held = byType[kind.key] || [];
-      var mark = held.length ? "<span class='doc-mark held' title='Uploaded'>&#10003;</span>"
+      var blind = unreadable(held);
+      var mark = held.length
+                   ? (blind.length === held.length
+                        ? "<span class='doc-mark unread' title='Uploaded, but no readable text'>i</span>"
+                        : "<span class='doc-mark held' title='Uploaded'>&#10003;</span>")
                : kind.required ? "<span class='doc-mark needed' title='Still needed'>!</span>"
                : "<span class='doc-mark' title='Optional'>&ndash;</span>";
+      var note = held.length
+        ? held.map(function(d){return d.original_filename;}).join(", ")
+        : (kind.hint||"");
       return "<div class='doc-slot'>"+mark+
         "<span class='doc-name'><strong>"+esc(kind.label)+
           (kind.required?"":" <span style='font-weight:400;'>(optional)</span>")+"</strong>"+
-        "<span>"+esc(held.length ? held.map(function(d){return d.original_filename;}).join(", ")
-                                  : (kind.hint||""))+"</span></span>"+
+        "<span>"+esc(note)+
+        (held.length && blind.length === held.length
+          ? " <span class='warnish'>\u2014 no readable text in this file, so it "+
+            "cannot be quoted in an application. If it is a scan, upload a "+
+            "text version too.</span>"
+          : "")+"</span></span>"+
         (held.length
           ? held.map(function(d){
               return "<button class='btn small danger' data-deldoc='"+esc(d.id)+"'>Remove</button>";

@@ -29,6 +29,8 @@ import re
 import httpx
 
 from .application_spec import SectionSpec, SubmissionSpec
+# profile_facts used to live here and was an exact duplicate of this.
+from .evidence import stated_facts as profile_facts  # noqa: F401
 from .extraction_llm import (
     DEFAULT_MODEL,
     DEFAULT_OLLAMA_URL,
@@ -219,50 +221,6 @@ like [Your Name] - use their real name, and leave out anything you do not \
 have.
 
 Write the letter now:"""
-
-
-def profile_facts(profile) -> str:
-    """The applicant's stated facts, as the only permitted source.
-
-    Deliberately a flat list of what the owner actually entered - the point
-    is that a reader of the prompt can see exactly what the model was allowed
-    to assert, which is also what makes a fabricated claim identifiable as
-    one afterwards.
-    """
-    bits: list[str] = []
-
-    def add(label: str, value) -> None:
-        if not value:
-            return
-        if isinstance(value, (list, tuple)):
-            items = [str(v).strip() for v in value if str(v).strip()]
-            if items:
-                bits.append(f"- {label}: {'; '.join(items)}")
-        else:
-            text = str(value).strip()
-            if text:
-                bits.append(f"- {label}: {text}")
-
-    add("Name", getattr(profile, "name", None))
-    add("Country", getattr(profile, "country", None))
-    # Person-shaped
-    add("Field", getattr(profile, "field", None))
-    add("Study level", getattr(profile, "study_level", None))
-    add("Qualifications", getattr(profile, "certificates", None))
-    add("Work history", getattr(profile, "work_history", None))
-    add("Achievements", getattr(profile, "achievements", None))
-    # Organisation-shaped
-    add("Sectors", getattr(profile, "sectors", None))
-    add("Past contracts", getattr(profile, "past_contracts", None))
-    add("Certifications", getattr(profile, "certifications", None))
-    add("Years trading", getattr(profile, "years_trading", None))
-    # Shared
-    add("Interests", getattr(profile, "interests", None))
-    add("Goals", getattr(profile, "goals", None))
-    add("Background", getattr(profile, "history", None))
-    add("Other notes", getattr(profile, "notes", None))
-
-    return "\n".join(bits) if bits else "- (the applicant has not filled in their profile)"
 
 
 def words_for_each_section(spec, section_count: int) -> int:

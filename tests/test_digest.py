@@ -1,8 +1,16 @@
-from datetime import date
+from datetime import date, timedelta
 
 from opportunity_agent.digest import build_digest
 from opportunity_agent.matching import match_opportunity
 from opportunity_agent.models import Opportunity, PersonalProfile
+
+
+# Relative, not fixed. A sibling file had "deadline": date(2026, 9, 17)
+# written into its fixture; that morning arrived and tests about category
+# matching began failing with "This closed on 2026-09-17". These assert on
+# eligibility and drafting, not on dates, so their deadline only has to be
+# open.
+OPEN_DEADLINE = date.today() + timedelta(days=90)
 
 
 def make_opportunity(**overrides):
@@ -10,7 +18,7 @@ def make_opportunity(**overrides):
         "source": "Example Foundation",
         "title": "STEM Leadership Scholarship",
         "url": "https://example.org/scholarship",
-        "deadline": date(2026, 12, 1),
+        "deadline": OPEN_DEADLINE,
         "eligible_countries": ["Zimbabwe"],
         "required_documents": ["transcript"],
         "evidence": ["official scholarship eligibility page"],

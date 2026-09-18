@@ -110,7 +110,6 @@ def _cache_writer(session: Session, backend: str) -> Callable[[str, list[SearchR
         session.commit()
     return cache_set
 from .models import Opportunity, OrganisationProfile, PersonalProfile
-from .search import SearchResult
 
 DRAFTABLE_STATUSES = ("eligible",)
 
