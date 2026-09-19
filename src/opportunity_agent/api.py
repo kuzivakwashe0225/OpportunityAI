@@ -32,6 +32,7 @@ from . import section_drafting as section_drafting_module
 from . import evidence as evidence_module
 from . import application_form as application_form_module
 from . import throttle as throttle_module
+from . import google_auth as google_auth_module
 from .extraction_llm import ExtractedFacts, extract_facts_from_text
 
 app = FastAPI(title="OpportunityAI")
@@ -54,6 +55,14 @@ app.mount(
 # http://localhost still works - a Secure cookie is simply never sent there,
 # which would lock a developer out of their own machine with no error to read.
 HSTS_ENABLED = os.getenv("HSTS_ENABLED", "").lower() in ("1", "true", "yes")
+
+# Google Identity Services needs only this to verify a credential - no
+# secret, because the browser never hands this server anything but a signed
+# JWT it can check for itself (google_auth.py). Unset is a supported state:
+# /auth/config reports it as absent and the frontend shows the button as not
+# configured rather than a broken one, exactly the way SESSION_COOKIE_SECURE
+# and CREDENTIALS_SECRET_KEY already degrade rather than crash the app.
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
 
 
 @app.middleware("http")
@@ -233,6 +242,102 @@ def _set_session_cookie(response: Response, account_id: str) -> str:
         samesite="lax", secure=COOKIES_SECURE, max_age=max_age,
     )
     return expires_at.isoformat()
+
+
+@app.get("/auth/config")
+def auth_config() -> dict[str, str | None]:
+    """What the sign-in page needs to know before it renders a single button.
+
+    Public on purpose - it reveals nothing but whether a feature is turned on,
+    the same as a login page's own "forgot password?" link being visible to
+    someone who isn't signed in yet.
+    """
+    return {"google_client_id": GOOGLE_CLIENT_ID or None}
+
+
+class GoogleLoginRequest(BaseModel):
+    # Google Identity Services' own field name for the signed JWT it hands
+    # back to the page - kept as-is rather than renamed, so the frontend can
+    # forward the object it received without reshaping it.
+    credential: str
+
+
+# Swappable in tests, the same pattern as _send_mail: nothing in the suite may
+# reach Google's real key set or hold a real Google account.
+_verify_google_id_token = google_auth_module.verify_google_id_token
+
+
+@app.post("/login/google", response_model=AccountOut)
+def login_with_google(
+    payload: GoogleLoginRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db_session),
+) -> models_db.Account:
+    """Sign in - or, on a first visit, sign up - with a Google account.
+
+    There is no separate "register with Google" endpoint: the browser proves
+    who someone is the same way whether this is their first visit or their
+    hundredth, so the only question worth asking server-side is "have we seen
+    this person before", not "did they mean to sign up or log in".
+    """
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured")
+
+    address = throttle_module.client_address(request)
+    address_key = f"addr:{address}"
+    wait = throttle_module.sign_in_by_address.retry_after(address_key)
+    if wait:
+        raise _too_many(wait)
+
+    try:
+        claims = _verify_google_id_token(payload.credential, GOOGLE_CLIENT_ID)
+    except google_auth_module.GoogleAuthError as error:
+        throttle_module.sign_in_by_address.record_failure(address_key)
+        raise HTTPException(status_code=401, detail=str(error))
+
+    # Google verifying the email is exactly the guarantee a "click the link
+    # we emailed you" flow gives everywhere else in this system - so it is
+    # treated the same way: enough to sign in with, never enough on its own
+    # to silently reuse someone else's identity if it were ever false.
+    if not claims.get("email_verified"):
+        throttle_module.sign_in_by_address.record_failure(address_key)
+        raise HTTPException(
+            status_code=401,
+            detail="Google has not verified this email address",
+        )
+
+    subject = str(claims["sub"])
+    email = str(claims["email"]).strip().lower()
+
+    account = db.query(models_db.Account).filter_by(
+        oauth_provider="google", oauth_subject=subject
+    ).first()
+    if account is None:
+        # Not seen this Google identity before - but the email might already
+        # hold a password-based account. Linking is safe here specifically
+        # because Google has verified the email, which is the same trust
+        # basis a password reset already relies on.
+        account = db.query(models_db.Account).filter_by(email=email).first()
+    if account is None:
+        account = models_db.Account(
+            email=email,
+            # Never used to sign in - only Google can authenticate this
+            # account from here - but every account needs *a* hash, and a
+            # random unusable one is the honest way to say so rather than
+            # leaving the column empty.
+            password_hash=auth_module.hash_password(secrets.token_urlsafe(32)),
+            must_change_password=False,
+        )
+        db.add(account)
+
+    account.oauth_provider = "google"
+    account.oauth_subject = subject
+    db.commit()
+
+    throttle_module.sign_in_by_address.clear(address_key)
+    _set_session_cookie(response, account.id)
+    return account
 
 
 @app.get("/", include_in_schema=False)

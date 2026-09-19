@@ -28,7 +28,8 @@
 <link rel="icon" type="image/png" href="/assets/favicon.png">
 <link rel="apple-touch-icon" href="/assets/icon-192.png">
 <link rel="manifest" href="/assets/manifest.json">
-<meta name="theme-color" content="#934326">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<meta name="theme-color" content="#0f3d2a">
 
 <script type="application/ld+json">
 {
@@ -46,13 +47,19 @@
 
 <style>
   :root{
-    --bg:#f4f0e8; --surface:#fffdf8; --ink:#18211b; --ink-soft:#5b6a5e;
-    --line:#ded8ca; --accent:#934326; --accent-soft:#f3e5da;
-    --ok:#2f6d4f; --ok-soft:#e4efe8; --warn:#8a6410; --warn-soft:#f7edd4;
-    --bad:#a33b2d; --bad-soft:#f7e3df; --shell:#1d2620;
+    --bg:#f2f6f3; --surface:#ffffff; --surface-sunk:#eef4f0;
+    --ink:#12241c; --ink-soft:#5b6b62; --ink-faint:#8a978f;
+    --line:#dbe6e0; --accent:#15803d; --accent-strong:#0f3d2a;
+    --accent-soft:#e3f3e9;
+    --ok:#1c7c4a; --ok-soft:#e3f3e9; --warn:#92650e; --warn-soft:#fbefd9;
+    --bad:#a33b2d; --bad-soft:#f7e3df; --shell:#0f3d2a;
+    --info:#1d5fa8; --info-soft:#e3ecf7; --purple:#6d4aa8; --purple-soft:#eee7f7;
   }
   *{box-sizing:border-box;}
-  body{margin:0;font-family:Georgia,"Times New Roman",serif;color:var(--ink);background:var(--bg);}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,
+    "Helvetica Neue",Arial,sans-serif;color:var(--ink);background:var(--bg);
+    -webkit-font-smoothing:antialiased;}
+  h1,h2,h3{font-weight:700;letter-spacing:-.01em;}
   button{font-family:ui-sans-serif,system-ui,sans-serif;cursor:pointer;}
   input,select,textarea{font-family:ui-sans-serif,system-ui,sans-serif;}
   h1,h2,h3{margin:0;}
@@ -128,9 +135,9 @@
 
   /* ---------- depth ---------- */
   :root{
-    --lift-1:0 1px 2px rgba(29,38,32,.06), 0 2px 6px rgba(29,38,32,.05);
-    --lift-2:0 2px 4px rgba(29,38,32,.07), 0 8px 20px rgba(29,38,32,.08);
-    --lift-3:0 10px 28px rgba(29,38,32,.13), 0 2px 6px rgba(29,38,32,.08);
+    --lift-1:0 1px 2px rgba(18,36,28,.06), 0 2px 6px rgba(18,36,28,.05);
+    --lift-2:0 2px 4px rgba(18,36,28,.07), 0 8px 20px rgba(18,36,28,.08);
+    --lift-3:0 10px 28px rgba(18,36,28,.13), 0 2px 6px rgba(18,36,28,.08);
   }
   section.panel, .card{box-shadow:var(--lift-1);
     transition:box-shadow .22s ease, transform .22s ease;}
@@ -183,40 +190,148 @@
   .suggestion .s-warn{display:block;font-family:ui-sans-serif,system-ui,sans-serif;
     font-size:.78rem;color:var(--warn);margin-top:2px;}
 
-  /* ---------- auth ---------- */
-  #auth-view{max-width:420px;margin:0 auto;padding:80px 24px;}
-  #auth-view h1{font-size:2.6rem;margin-bottom:6px;}
-  .card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:24px;}
+  /* ---------- auth: split screen ---------- */
+  #auth-view{display:flex;min-height:100vh;background:var(--surface);}
+  .auth-form-col{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;
+    padding:40px 24px;}
+  .auth-form-inner{width:100%;max-width:392px;}
+  #auth-view .brand-row{display:flex;align-items:center;gap:10px;margin-bottom:34px;}
+  #auth-view .brand-row .mark{width:32px;height:32px;border-radius:8px;background:var(--accent-strong);
+    display:grid;place-items:center;flex:none;}
+  #auth-view .brand-row .mark svg{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:1.8;
+    stroke-linecap:round;stroke-linejoin:round;}
+  #auth-view .brand-row .brand{font-size:1.15rem;font-weight:700;color:var(--ink);}
+  #auth-view h1{font-size:1.7rem;margin-bottom:6px;font-weight:700;}
+  .card{background:transparent;border:none;border-radius:0;padding:0;}
 
-  /* ---------- app shell ---------- */
-  header.appbar{background:var(--shell);color:#f2efe6;padding:0 22px;display:flex;
-    align-items:center;gap:18px;height:58px;position:sticky;top:0;z-index:20;}
-  header.appbar .brand{font-size:1.15rem;font-weight:700;letter-spacing:.02em;}
+  .google-btn-wrap{margin:22px 0 4px;min-height:40px;}
+  .google-btn-wrap[data-state="unconfigured"]{
+    border:1px dashed var(--line);border-radius:7px;padding:10px 12px;
+    font-size:.82rem;color:var(--ink-soft);}
+  .auth-divider{display:flex;align-items:center;gap:12px;margin:20px 0;
+    font-size:.76rem;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.08em;}
+  .auth-divider::before,.auth-divider::after{content:"";flex:1;height:1px;background:var(--line);}
+
+  .auth-illustration{flex:1;min-width:0;background:var(--accent-strong);position:relative;
+    overflow:hidden;display:flex;align-items:center;justify-content:center;padding:40px;}
+  .auth-illustration .glow{position:absolute;width:520px;height:520px;border-radius:50%;
+    background:radial-gradient(circle,rgba(255,255,255,.10),transparent 70%);top:-120px;right:-140px;}
+  .auth-illustration .glow2{position:absolute;width:420px;height:420px;border-radius:50%;
+    background:radial-gradient(circle,rgba(255,255,255,.07),transparent 70%);bottom:-160px;left:-120px;}
+  .auth-illustration .panel{position:relative;background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.16);border-radius:16px;padding:30px;max-width:380px;
+    backdrop-filter:blur(2px);}
+  .auth-illustration .panel h2{color:#fff;font-size:1.5rem;line-height:1.3;margin-bottom:10px;}
+  .auth-illustration .panel p{color:rgba(255,255,255,.72);font-size:.92rem;line-height:1.55;margin:0;}
+  .auth-illustration .steps-mini{margin-top:22px;display:flex;flex-direction:column;gap:10px;}
+  .auth-illustration .steps-mini div{display:flex;align-items:center;gap:10px;color:rgba(255,255,255,.9);
+    font-size:.86rem;background:rgba(255,255,255,.08);border-radius:9px;padding:9px 12px;}
+  .auth-illustration .steps-mini svg{width:16px;height:16px;stroke:#7be6a6;fill:none;stroke-width:2.2;
+    stroke-linecap:round;stroke-linejoin:round;flex:none;}
+
+  @media (max-width:840px){ .auth-illustration{display:none;} }
+
+  /* ---------- onboarding: the same split screen, full-bleed ---------- */
+  #app-shell.onboarding-mode .sidebar,
+  #app-shell.onboarding-mode header.appbar{display:none;}
+  #app-shell.onboarding-mode main{max-width:none;padding:0;width:auto;}
+  .onboard-split{display:flex;min-height:100vh;}
+  .onboard-form-col{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;
+    padding:48px 24px;}
+  .onboard-form-inner{width:100%;max-width:540px;}
+  .onboard-dots{display:flex;align-items:center;gap:12px;margin-bottom:22px;}
+  .onboard-dots .eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;
+    color:var(--ink-faint);font-weight:700;}
+  .onboard-dots .dashes{display:flex;gap:5px;}
+  .onboard-dots .dash{width:20px;height:4px;border-radius:2px;background:var(--line);}
+  .onboard-dots .dash.done{background:var(--accent);}
+  .onboard-dots .dash.active{background:var(--accent);width:32px;}
+  .onboard-form-inner h1{font-size:1.7rem;margin-bottom:8px;}
+  .onboard-form-inner > p.muted{max-width:70ch;}
+  @media (max-width:840px){ #app-shell.onboarding-mode .auth-illustration{display:none;} }
+
+  /* ---------- app shell: sidebar + content column ---------- */
+  #app-shell{display:flex;align-items:stretch;min-height:100vh;}
+
+  .sidebar{width:236px;flex:none;background:var(--surface);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;position:sticky;top:0;height:100vh;z-index:25;}
+  .sidebar .brand-row{display:flex;align-items:center;gap:10px;padding:20px 20px 16px;}
+  .sidebar .brand-row .mark{width:30px;height:30px;border-radius:8px;background:var(--accent-strong);
+    display:grid;place-items:center;flex:none;}
+  .sidebar .brand-row .mark svg{width:17px;height:17px;stroke:#fff;}
+  .sidebar .brand-row .brand{font-size:1.05rem;font-weight:700;letter-spacing:-.01em;color:var(--ink);}
+  .sidebar-close{display:none;background:none;border:none;color:var(--ink-soft);padding:4px;margin-left:auto;}
+
+  /* Reskinned in place: still <nav class="tabs">, still the exact element
+     renderRoute() queries, now laid out as a vertical icon+label list. */
+  nav.tabs{background:transparent;border-bottom:none;padding:6px 12px;
+    display:flex;flex-direction:column;gap:2px;overflow-x:visible;flex:1;}
+  nav.tabs a{display:flex;align-items:center;gap:11px;padding:10px 12px;text-decoration:none;
+    color:var(--ink-soft);font-size:.89rem;font-weight:500;border-bottom:none;border-radius:8px;
+    white-space:nowrap;}
+  nav.tabs a svg{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;
+    stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+  nav.tabs a:hover{background:var(--surface-sunk);color:var(--ink);}
+  nav.tabs a.active{color:var(--accent-strong);background:var(--accent-soft);font-weight:700;}
+  nav.tabs .badge{background:var(--accent);color:#fff;border-radius:10px;padding:1px 7px;
+    font-size:.72rem;margin-left:auto;font-weight:700;}
+
+  .content-col{flex:1;min-width:0;display:flex;flex-direction:column;}
+
+  header.appbar{background:var(--surface);color:var(--ink);border-bottom:1px solid var(--line);
+    padding:0 24px;display:flex;align-items:center;gap:14px;height:60px;position:sticky;top:0;z-index:20;}
+  header.appbar .brand{display:none;} /* brand now lives in the sidebar */
   header.appbar .spacer{flex:1;}
+  .sidebar-toggle{display:none;background:none;border:none;color:var(--ink);padding:6px;}
+  .sidebar-toggle svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;
+    stroke-linecap:round;stroke-linejoin:round;}
+  .sidebar-scrim{display:none;position:fixed;inset:0;background:rgba(15,61,42,.35);z-index:24;}
+
   .switcher{position:relative;}
-  .switcher-btn{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:#f2efe6;
-    padding:7px 12px;border-radius:5px;font-size:.85rem;display:flex;align-items:center;gap:8px;}
+  .switcher-btn{background:var(--surface-sunk);border:1px solid var(--line);color:var(--ink);
+    padding:7px 12px;border-radius:7px;font-size:.85rem;display:flex;align-items:center;gap:8px;}
   .switcher-menu{display:none;position:absolute;right:0;top:42px;background:var(--surface);
-    border:1px solid var(--line);border-radius:6px;min-width:250px;box-shadow:0 10px 28px #0003;overflow:hidden;}
+    border:1px solid var(--line);border-radius:8px;min-width:250px;box-shadow:var(--lift-3);overflow:hidden;}
   .switcher-menu.open{display:block;}
   .switcher-menu button{display:block;width:100%;text-align:left;background:none;border:none;
     padding:11px 14px;font-size:.88rem;color:var(--ink);border-bottom:1px solid var(--line);}
   .switcher-menu button:hover{background:var(--accent-soft);}
   .switcher-menu button:last-child{border-bottom:none;}
   .switcher-menu .type{display:block;font-size:.72rem;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em;}
-  .bell{position:relative;background:none;border:none;color:#f2efe6;font-size:1.15rem;padding:4px 8px;}
-  .bell .dot{position:absolute;top:0;right:2px;background:var(--bad);color:#fff;border-radius:10px;
-    font-size:.62rem;padding:1px 5px;font-family:ui-sans-serif,system-ui,sans-serif;font-weight:700;}
 
-  nav.tabs{background:var(--surface);border-bottom:1px solid var(--line);padding:0 22px;
-    display:flex;gap:4px;position:sticky;top:58px;z-index:19;overflow-x:auto;}
-  nav.tabs a{padding:13px 15px;text-decoration:none;color:var(--ink-soft);
-    font-family:ui-sans-serif,system-ui,sans-serif;font-size:.9rem;border-bottom:3px solid transparent;white-space:nowrap;}
-  nav.tabs a.active{color:var(--ink);border-bottom-color:var(--accent);font-weight:600;}
-  nav.tabs .badge{background:var(--accent);color:#fff;border-radius:10px;padding:1px 7px;
-    font-size:.72rem;margin-left:6px;font-weight:700;}
+  .bell{position:relative;background:none;border:none;color:var(--ink-soft);padding:6px;border-radius:7px;}
+  .bell:hover{background:var(--surface-sunk);color:var(--ink);}
+  .bell svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.8;
+    stroke-linecap:round;stroke-linejoin:round;}
+  .bell .dot{position:absolute;top:1px;right:1px;background:var(--bad);color:#fff;border-radius:10px;
+    font-size:.6rem;padding:1px 4px;font-family:inherit;font-weight:700;}
 
-  main{max-width:1000px;margin:0 auto;padding:30px 22px 90px;}
+  .avatar-menu{position:relative;}
+  .avatar-btn{background:none;border:none;display:flex;align-items:center;gap:8px;padding:4px 6px 4px 4px;
+    border-radius:20px;}
+  .avatar-btn:hover{background:var(--surface-sunk);}
+  .avatar-circle{width:30px;height:30px;border-radius:50%;background:var(--accent-strong);color:#fff;
+    display:grid;place-items:center;font-size:.78rem;font-weight:700;flex:none;}
+  .avatar-btn .avatar-name{font-size:.86rem;color:var(--ink);font-weight:600;}
+  .avatar-btn svg{width:14px;height:14px;stroke:var(--ink-soft);fill:none;stroke-width:2;}
+
+  main{max-width:1120px;margin:0 auto;padding:26px 26px 90px;width:100%;}
+
+  @media (max-width:920px){
+    .sidebar{position:fixed;left:0;top:0;transform:translateX(-100%);transition:transform .22s ease;
+      box-shadow:var(--lift-3);}
+    .sidebar.open{transform:translateX(0);}
+    .sidebar-scrim.open{display:block;}
+    .sidebar-close{display:block;}
+    .sidebar-toggle{display:block;}
+    header.appbar .avatar-name{display:none;}
+    /* The sidebar carries the brand mark, and the sidebar is off-canvas by
+       default at this width - without this a phone screen would show no
+       name for the app at all until the drawer was opened. */
+    header.appbar .brand{display:flex;align-items:center;font-size:1.05rem;
+      font-weight:700;color:var(--ink);}
+    main{padding:18px 16px 90px;}
+  }
   .view-title{font-size:1.7rem;margin-bottom:4px;}
   .view-sub{color:var(--ink-soft);font-family:ui-sans-serif,system-ui,sans-serif;font-size:.92rem;margin:0 0 24px;}
   section.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;
@@ -295,11 +410,6 @@
   .req-body{flex:1;min-width:0;}
 
   /* ---------- onboarding ---------- */
-  .steps{display:flex;gap:8px;margin-bottom:24px;flex-wrap:wrap;}
-  .step{flex:1;min-width:120px;padding:11px 14px;border:1px solid var(--line);border-radius:6px;
-    background:var(--surface);font-family:ui-sans-serif,system-ui,sans-serif;font-size:.85rem;color:var(--ink-soft);}
-  .step.active{border-color:var(--accent);color:var(--ink);font-weight:600;}
-  .step.done{background:var(--ok-soft);border-color:var(--ok);color:var(--ok);}
   .type-pick{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;}
   .type-card{border:2px solid var(--line);background:#fff;border-radius:8px;padding:18px;text-align:left;}
   .type-card.selected{border-color:var(--accent);background:var(--accent-soft);}
@@ -323,6 +433,108 @@
   .advice li{margin:3px 0;font-size:.86rem;}
   .advice.blocked{border-left-color:#b23c17;background:#fdf1ec;}
 
+  /* ---------- dashboard v2 ---------- */
+  .hero{background:linear-gradient(135deg,var(--accent-strong),#0a2b1d);border-radius:16px;
+    padding:36px 34px;margin-bottom:22px;color:#fff;position:relative;overflow:hidden;}
+  .hero::before{content:"";position:absolute;width:380px;height:380px;border-radius:50%;
+    background:radial-gradient(circle,rgba(255,255,255,.08),transparent 70%);top:-140px;right:-80px;}
+  .hero-eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:#8fe3b3;
+    font-weight:700;margin-bottom:10px;position:relative;}
+  .hero h1{font-size:1.9rem;line-height:1.25;max-width:520px;margin-bottom:10px;color:#fff;
+    position:relative;}
+  .hero p{color:rgba(255,255,255,.78);max-width:480px;margin:0 0 22px;font-size:.95rem;
+    line-height:1.55;position:relative;}
+  .hero-actions{display:flex;gap:10px;flex-wrap:wrap;position:relative;}
+  .hero .btn{background:#fff;color:var(--accent-strong);border-color:#fff;}
+  .hero .btn.ghost{background:transparent;color:#fff;border-color:rgba(255,255,255,.4);}
+
+  .stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;
+    margin-bottom:20px;}
+  .stat-tile{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;}
+  .stat-tile .icon-chip{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+    margin-bottom:12px;}
+  .stat-tile .icon-chip svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:2;
+    stroke-linecap:round;stroke-linejoin:round;}
+  .stat-tile .n{font-size:1.8rem;font-weight:700;line-height:1;}
+  .stat-tile .k{font-size:.76rem;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em;
+    margin-top:6px;}
+  .stat-tile.amber .icon-chip{background:var(--warn-soft);color:var(--warn);}
+  .stat-tile.blue .icon-chip{background:var(--info-soft);color:var(--info);}
+  .stat-tile.red .icon-chip{background:var(--bad-soft);color:var(--bad);}
+  .stat-tile.green .icon-chip{background:var(--ok-soft);color:var(--ok);}
+  .stat-tile.purple .icon-chip{background:var(--purple-soft);color:var(--purple);}
+
+  .dash-grid{display:grid;grid-template-columns:2fr 1fr;gap:20px;align-items:start;}
+  @media (max-width:940px){ .dash-grid{grid-template-columns:1fr;} }
+
+  .panel-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+    margin-bottom:16px;}
+  .panel-head h2{font-size:1.05rem;}
+  .panel-head a{font-size:.84rem;font-weight:600;text-decoration:none;}
+
+  .opp-row{display:flex;align-items:center;gap:14px;padding:13px 0;border-bottom:1px solid var(--line);}
+  .opp-row:last-child{border-bottom:none;}
+  .opp-row .opp-logo{width:40px;height:40px;border-radius:9px;background:var(--surface-sunk);
+    display:grid;place-items:center;font-weight:700;font-size:.85rem;color:var(--ink-soft);flex:none;}
+  .opp-row .opp-main{flex:1;min-width:0;}
+  .opp-row .opp-main strong{display:block;font-size:.92rem;}
+  .opp-row .opp-meta{display:flex;gap:10px;flex-wrap:wrap;font-size:.78rem;color:var(--ink-soft);
+    margin-top:3px;}
+  .opp-row .match-pill{background:var(--ok-soft);color:var(--ok);font-size:.76rem;font-weight:700;
+    padding:3px 9px;border-radius:20px;flex:none;white-space:nowrap;}
+  .opp-row .opp-actions{flex:none;}
+
+  .side-card{background:var(--surface);border:1px solid var(--line);border-radius:12px;
+    padding:18px 20px;margin-bottom:18px;}
+  .side-card h2{font-size:.98rem;margin-bottom:12px;}
+
+  .progress-track{height:8px;background:var(--surface-sunk);border-radius:5px;overflow:hidden;
+    margin:8px 0 14px;}
+  .progress-fill{height:100%;background:var(--accent);border-radius:5px;}
+  .complete-item{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:8px 0;border-bottom:1px solid var(--line);font-size:.86rem;}
+  .complete-item:last-child{border-bottom:none;}
+  .complete-item .left{display:flex;align-items:center;gap:9px;}
+  .complete-item .tick{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;
+    flex:none;}
+  .complete-item .tick.done{background:var(--ok-soft);color:var(--ok);}
+  .complete-item .tick.pending{background:var(--surface-sunk);color:var(--ink-faint);}
+  .complete-item .tick svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:3;}
+  .complete-item a{font-size:.8rem;font-weight:600;}
+
+  .agent-card{background:var(--accent-soft);border:1px solid var(--accent);}
+  .agent-card .agent-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+  .agent-card .agent-icon{width:32px;height:32px;border-radius:8px;background:var(--accent-strong);
+    display:grid;place-items:center;flex:none;}
+  .agent-card .agent-icon svg{width:16px;height:16px;stroke:#fff;fill:none;stroke-width:2;
+    stroke-linecap:round;stroke-linejoin:round;}
+  .agent-status{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+    color:var(--ok);display:flex;align-items:center;gap:5px;}
+  .agent-status .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);}
+  .agent-card p{font-size:.85rem;color:var(--ink-soft);margin:0 0 12px;line-height:1.5;}
+
+  .activity-item{display:flex;gap:11px;padding:10px 0;border-bottom:1px solid var(--line);}
+  .activity-item:last-child{border-bottom:none;}
+  .activity-item .a-icon{width:30px;height:30px;border-radius:8px;background:var(--surface-sunk);
+    display:grid;place-items:center;flex:none;color:var(--ink-soft);}
+  .activity-item .a-icon svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;
+    stroke-linecap:round;stroke-linejoin:round;}
+  .activity-item .a-body{flex:1;min-width:0;}
+  .activity-item strong{display:block;font-size:.86rem;}
+  .activity-item span.sub{display:block;font-size:.78rem;color:var(--ink-soft);}
+  .activity-item .when{font-size:.74rem;color:var(--ink-faint);white-space:nowrap;flex:none;}
+
+  .goals-banner{display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:space-between;
+    background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 22px;
+    margin-top:6px;}
+  .goals-banner .left{display:flex;align-items:center;gap:14px;}
+  .goals-banner .g-icon{width:38px;height:38px;border-radius:10px;background:var(--accent-soft);
+    color:var(--accent);display:grid;place-items:center;flex:none;}
+  .goals-banner .g-icon svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;
+    stroke-linecap:round;stroke-linejoin:round;}
+  .goals-banner strong{display:block;font-size:.92rem;}
+  .goals-banner span{display:block;font-size:.82rem;color:var(--ink-soft);}
+
   /* ---------- documents / notifications ---------- */
   table{width:100%;border-collapse:collapse;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.87rem;}
   th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);}
@@ -343,10 +555,20 @@
 
 <!-- ============ AUTH ============ -->
 <div id="auth-view" hidden>
-  <h1>OpportunityAI</h1>
-  <p class="muted" style="margin-bottom:26px;">Finds opportunities while you're busy. You review what's worth sending.</p>
+  <div class="auth-form-col">
+  <div class="auth-form-inner">
+  <div class="brand-row">
+    <span class="mark"><svg viewBox="0 0 24 24"><path d="M4 7l8-4 8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 17l8 4 8-4"/></svg></span>
+    <span class="brand">OpportunityAI</span>
+  </div>
+  <h1 id="auth-heading">Log in</h1>
+  <p class="muted" style="margin-bottom:6px;" id="auth-subheading">Finds opportunities while you're busy. You review what's worth sending.</p>
   <div class="card">
-    <h2 id="auth-heading" style="font-size:1.2rem;margin-bottom:6px;">Log in</h2>
+    <!-- Google Identity Services renders its own button into this element
+         once /auth/config says a client id is configured; left empty (and
+         hidden) otherwise, with a note in its place - see initGoogleAuth(). -->
+    <div class="google-btn-wrap" id="google-btn-login" hidden></div>
+    <div class="auth-divider" id="auth-divider-login" hidden>or continue with email</div>
     <form id="login-form">
       <label for="login-email">Email</label>
       <input id="login-email" type="text" autocomplete="username">
@@ -381,6 +603,8 @@
         <button class="btn" id="forgot-sent-login" type="button">Go to sign in</button>
       </div>
     </div>
+    <div class="google-btn-wrap" id="google-btn-register" hidden></div>
+    <div class="auth-divider" id="auth-divider-register" hidden>or continue with email</div>
     <form id="register-form" hidden>
       <label for="register-email">Email</label>
       <input id="register-email" type="text" autocomplete="username">
@@ -428,6 +652,23 @@
       Already have an account? <button class="link-btn" id="show-login-btn" type="button">Log in</button>
     </p>
   </div>
+  </div>
+  </div>
+  <div class="auth-illustration">
+    <div class="glow"></div><div class="glow2"></div>
+    <div class="panel">
+      <h2>AI searches. You approve.</h2>
+      <p>It checks scholarships, jobs, grants and tenders against your profile
+         every hour, drafts the application for anything you qualify for, and
+         waits for you to say send.</p>
+      <div class="steps-mini">
+        <div><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>Search on a schedule</div>
+        <div><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>Check your eligibility</div>
+        <div><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>Draft the application</div>
+        <div><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>You review and send it</div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Session warning. Lives outside the app shell so it survives a re-render
@@ -447,35 +688,82 @@
 
 <!-- ============ APP SHELL ============ -->
 <div id="app-shell" hidden>
-  <header class="appbar">
-    <span class="brand">OpportunityAI</span>
-    <span class="spacer"></span>
-    <div class="switcher" id="switcher">
-      <button class="switcher-btn" id="switcher-btn" type="button">
-        <span id="active-profile-label">No profile</span> <span aria-hidden="true">▾</span>
+  <div class="sidebar-scrim" id="sidebar-scrim"></div>
+  <aside class="sidebar" id="sidebar">
+    <div class="brand-row">
+      <span class="mark"><svg viewBox="0 0 24 24"><path d="M4 7l8-4 8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 17l8 4 8-4"/></svg></span>
+      <span class="brand">OpportunityAI</span>
+      <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close menu">
+        <svg viewBox="0 0 24 24" style="width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;"><path d="M18 6L6 18M6 6l12 12"/></svg>
       </button>
-      <div class="switcher-menu" id="switcher-menu"></div>
     </div>
-    <button class="bell" id="bell-btn" type="button" title="Notifications">
-      🔔<span class="dot" id="bell-dot" hidden>0</span>
-    </button>
-    <button class="btn ghost small" id="logout-btn" type="button" style="color:#f2efe6;border-color:rgba(255,255,255,.3);">Log out</button>
-  </header>
+    <nav class="tabs" id="tabs">
+      <a href="#/dashboard" data-route="dashboard">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+        Dashboard
+      </a>
+      <a href="#/review" data-route="review">
+        <svg viewBox="0 0 24 24"><path d="M21 12V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h6"/><path d="M3 12h5l1.5 3h5L16 12h5"/><path d="M17 17l2 2 4-4"/></svg>
+        Review queue<span class="badge" id="review-badge" hidden>0</span>
+      </a>
+      <a href="#/opportunities" data-route="opportunities">
+        <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/></svg>
+        All opportunities
+      </a>
+      <a href="#/profile" data-route="profile">
+        <svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+        Profile &amp; documents
+      </a>
+      <a href="#/notifications" data-route="notifications">
+        <svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>
+        Notifications
+      </a>
+      <a href="#/bin" data-route="bin">
+        <svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13"/><path d="M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>
+        Bin
+      </a>
+      <a href="#/account" data-route="account">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9c.2.6.7 1 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        Account
+      </a>
+    </nav>
+  </aside>
 
-  <nav class="tabs" id="tabs">
-    <a href="#/dashboard" data-route="dashboard">Dashboard</a>
-    <a href="#/review" data-route="review">Review queue<span class="badge" id="review-badge" hidden>0</span></a>
-    <a href="#/opportunities" data-route="opportunities">All opportunities</a>
-    <a href="#/profile" data-route="profile">Profile &amp; documents</a>
-    <a href="#/notifications" data-route="notifications">Notifications</a>
-    <a href="#/bin" data-route="bin">Bin</a>
-    <a href="#/account" data-route="account">Account</a>
-  </nav>
+  <div class="content-col">
+    <header class="appbar">
+      <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Open menu">
+        <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <span class="brand">OpportunityAI</span>
+      <span class="spacer"></span>
+      <div class="switcher" id="switcher">
+        <button class="switcher-btn" id="switcher-btn" type="button">
+          <span id="active-profile-label">No profile</span> <span aria-hidden="true">▾</span>
+        </button>
+        <div class="switcher-menu" id="switcher-menu"></div>
+      </div>
+      <button class="bell" id="bell-btn" type="button" title="Notifications">
+        <svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>
+        <span class="dot" id="bell-dot" hidden>0</span>
+      </button>
+      <div class="avatar-menu" id="avatar-menu">
+        <button class="avatar-btn" id="avatar-btn" type="button">
+          <span class="avatar-circle" id="avatar-circle">?</span>
+          <span class="avatar-name" id="avatar-name"></span>
+          <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="switcher-menu" id="avatar-menu-panel">
+          <button type="button" id="avatar-account-link">Account</button>
+          <button type="button" id="logout-btn">Log out</button>
+        </div>
+      </div>
+    </header>
 
-  <main>
-    <div id="error-banner"><button id="error-dismiss" type="button">&times;</button><span id="error-text"></span></div>
-    <div id="view-root"></div>
-  </main>
+    <main>
+      <div id="error-banner"><button id="error-dismiss" type="button">&times;</button><span id="error-text"></span></div>
+      <div id="view-root"></div>
+    </main>
+  </div>
 </div>
 
 <script>
@@ -682,6 +970,7 @@
   function renderSwitcher(){
     var p = activeProfile();
     $("#active-profile-label").textContent = p ? p.display_name : "No profile";
+    renderAvatar();
     var menu=$("#switcher-menu");
     if(!state.profiles.length){
       menu.innerHTML = "<button type='button' data-action='onboard'>Set up your first profile</button>";
@@ -703,10 +992,57 @@
     });
   }
   $("#switcher-btn").addEventListener("click",function(e){
-    e.stopPropagation(); $("#switcher-menu").classList.toggle("open");
+    e.stopPropagation();
+    $("#avatar-menu-panel").classList.remove("open");
+    $("#switcher-menu").classList.toggle("open");
   });
-  document.addEventListener("click",function(){$("#switcher-menu").classList.remove("open");});
   $("#bell-btn").addEventListener("click",function(){location.hash="#/notifications";});
+
+  // ---------------- avatar menu ----------------
+  function initials(text){
+    var t=(text||"").trim();
+    if(!t) return "?";
+    var parts=t.split(/\s+/);
+    return (parts[0][0]+(parts[1]?parts[1][0]:"")).toUpperCase();
+  }
+  function renderAvatar(){
+    var p=activeProfile();
+    var label = (p && p.display_name) || (state.account && state.account.email) || "";
+    $("#avatar-circle").textContent = initials(label || "?");
+    $("#avatar-name").textContent = (p && p.display_name) || (state.account ? state.account.email : "");
+  }
+  $("#avatar-btn").addEventListener("click",function(e){
+    e.stopPropagation();
+    $("#switcher-menu").classList.remove("open");
+    $("#avatar-menu-panel").classList.toggle("open");
+  });
+  $("#avatar-account-link").addEventListener("click",function(){
+    $("#avatar-menu-panel").classList.remove("open");
+    location.hash="#/account";
+  });
+  document.addEventListener("click",function(){
+    $("#switcher-menu").classList.remove("open");
+    $("#avatar-menu-panel").classList.remove("open");
+  });
+
+  // ---------------- sidebar (mobile drawer) ----------------
+  function closeSidebar(){
+    $("#sidebar").classList.remove("open");
+    $("#sidebar-scrim").classList.remove("open");
+  }
+  function openSidebar(){
+    $("#sidebar").classList.add("open");
+    $("#sidebar-scrim").classList.add("open");
+  }
+  var sidebarToggle=$("#sidebar-toggle");
+  if(sidebarToggle) sidebarToggle.addEventListener("click",openSidebar);
+  var sidebarClose=$("#sidebar-close");
+  if(sidebarClose) sidebarClose.addEventListener("click",closeSidebar);
+  var sidebarScrim=$("#sidebar-scrim");
+  if(sidebarScrim) sidebarScrim.addEventListener("click",closeSidebar);
+  // Picking a destination on a phone should also put the drawer away -
+  // otherwise the new page renders behind it.
+  window.addEventListener("hashchange",closeSidebar);
 
   function renderBadges(){
     var unread = state.notifications.filter(function(n){return !n.read_at;}).length;
@@ -742,6 +1078,7 @@
     $all("nav.tabs a").forEach(function(a){
       a.classList.toggle("active", a.dataset.route===tab);
     });
+    $("#app-shell").classList.toggle("onboarding-mode", route==="onboarding");
     if(!state.profiles.length && route!=="onboarding"){ location.hash="#/onboarding"; return; }
     $("#view-root").innerHTML="<p class='empty'>Loading…</p>";
     try { await ROUTES[route](routeParam()); wireCoach(); }
@@ -750,6 +1087,31 @@
   window.addEventListener("hashchange",renderRoute);
 
   // ---------------- dashboard ----------------
+  var DASH_ICON = {
+    clock:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
+    search:'<svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/></svg>',
+    shieldOff:'<svg viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4.5-3 8-7 9-4-1-7-4.5-7-9V6z"/><path d="M9.5 9.5l5 5m0-5l-5 5"/></svg>',
+    check:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9"/></svg>',
+    send:'<svg viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>',
+    robot:'<svg viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M9 8V5a3 3 0 0 1 6 0v3"/><circle cx="9" cy="14" r="1.2"/><circle cx="15" cy="14" r="1.2"/></svg>',
+    target:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".6" fill="currentColor"/></svg>',
+    doc:'<svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
+    bell:'<svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>',
+    thumbsUp:'<svg viewBox="0 0 24 24"><path d="M7 11v9H4v-9z"/><path d="M7 11l3-8a2 2 0 0 1 2 2v4h5.5a2 2 0 0 1 2 2.4l-1.3 6A2 2 0 0 1 16.2 20H7"/></svg>'
+  };
+
+  function timeAgo(iso){
+    var then=new Date(iso).getTime(); if(isNaN(then)) return "";
+    var mins=Math.round((Date.now()-then)/60000);
+    if(mins<1) return "just now";
+    if(mins<60) return mins+"m ago";
+    var hrs=Math.round(mins/60);
+    if(hrs<24) return hrs+"h ago";
+    var days=Math.round(hrs/24);
+    if(days<30) return days+"d ago";
+    return new Date(iso).toLocaleDateString();
+  }
+
   async function renderDashboard(){
     var p=activeProfile();
     if(!p){ location.hash="#/onboarding"; return; }
@@ -762,72 +1124,179 @@
     });
     state.summary = summary; renderBadges();
 
-    var lastRun = summary.last_run ? new Date(summary.last_run).toLocaleString() : "never";
-    var cta = summary.awaiting_review
-      ? "<div class='callout'><p><strong>"+summary.awaiting_review+" application"+
-        (summary.awaiting_review===1?" is":"s are")+" drafted and waiting for you.</strong><br>"+
-        "<span class='muted'>The agent prepared these on its own. Nothing is sent until you approve it.</span></p>"+
-        "<a class='btn' href='#/review'>Review them</a></div>"
-      : (summary.blockers && summary.blockers.length && summary.total)
-        // The queue is empty but the shelf is not. Saying "nothing waiting"
-        // here reads as "nothing found", when the truth is that everything
-        // found is one missing field away from being actionable.
-        ? "<div class='callout blocked'><p><strong>"+summary.blockers[0].count+" of "+
-          summary.total+" are waiting on one thing.</strong><br><span class='muted'>"+
-          esc(blockerSentence(summary.blockers[0].reason))+
-          "</span></p><a class='btn' href='#/profile'>Fix this on your profile</a> "+
-          "<a class='btn plain' href='#/opportunities'>See them anyway</a></div>"
-        : "<div class='callout'><p><strong>Nothing waiting for you right now.</strong><br><span class='muted'>"+
-          "The agent keeps searching in the background and will queue up anything you're eligible for.</span></p>"+
-          "<button class='btn' id='run-now-btn' type='button'>Search now</button></div>";
-
-    // A run that reached the source and found nothing, and a run that could
-    // not reach the source at all, look identical on a dashboard that only
-    // shows counts. They are not the same thing and the second is not the
-    // owner's fault, so it gets said out loud.
-    var sourceTrouble = "";
-    if(summary.last_run_failures && summary.last_run_failures.length){
-      sourceTrouble =
-        "<div class='advice blocked'><strong>The last search couldn't reach a source.</strong>"+
-        "<p class='muted' style='margin:4px 0 0;'>"+
-        esc(String(summary.last_run_failures[0]).slice(0,240))+
-        "</p></div>";
-    } else if(summary.last_run && summary.last_run_found===0){
-      sourceTrouble =
-        "<div class='advice'><strong>The last search came back empty.</strong>"+
-        "<p class='muted' style='margin:4px 0 0;'>Nothing new was published, or the source was "+
-        "unavailable. Anything already found is still on "+
-        "<a href='#/opportunities'>All opportunities</a>.</p></div>";
-    }
+    var items=[], schema=null, docs=[];
+    try{
+      var loaded = await Promise.all([
+        api("/profiles/"+p.id+"/opportunities"),
+        api("/profiles/"+p.id+"/schema"),
+        api("/profiles/"+p.id+"/documents"),
+      ]);
+      items=loaded[0]; schema=loaded[1]; docs=loaded[2];
+    }catch(e){ /* dashboard still renders on the numbers alone */ }
+    state.opportunities=items;
 
     $("#view-root").innerHTML =
       coachHtml("dashboard",{profile:p,schema:schemaShim(p)})+
-      "<h1 class='view-title'>"+esc(p.display_name)+"</h1>"+
-      "<p class='view-sub'>"+esc(typeName(p.profile_type))+" · last searched "+esc(lastRun)+"</p>"+
-      cta+
-      "<div class='stats'>"+
-        stat(summary.awaiting_review,"Awaiting your review",true)+
-        stat(summary.total,"Found in total")+
-        stat(summary.not_eligible,"Judged not eligible")+
-        stat(summary.approved,"Approved by you")+
-        stat(summary.submitted,"Marked submitted")+
-      "</div>"+
-      sourceTrouble+
-      "<section class='panel'><h2>How this works</h2>"+
-      "<p class='muted' style='margin:0 0 10px;'>The agent runs on its own schedule. It searches using your profile, "+
-      "checks each opportunity against your eligibility, and drafts a full application for the ones you qualify for.</p>"+
-      "<p class='muted' style='margin:0;'>You only step in at the end: read the draft, approve it, and send it. "+
-      "It never submits anything for you. If you disagree with something it ruled out, you can push it through from "+
-      "<a href='#/opportunities'>All opportunities</a>.</p></section>"+
-      "<div class='row'><button class='btn plain' id='run-now-btn2' type='button'>Search now</button>"+
-      "<span class='status' id='run-status'></span></div>";
+      dashboardHero(p,summary)+
+      dashboardStats(summary)+
+      dashboardSourceTrouble(summary)+
+      "<div class='dash-grid'>"+
+        "<div>"+dashboardLatestOpportunities(items)+dashboardGoalsBanner(p)+"</div>"+
+        "<div>"+dashboardCompleteness(p,schema,docs)+dashboardAgentCard()+dashboardActivity()+"</div>"+
+      "</div>";
 
     ["run-now-btn","run-now-btn2"].forEach(function(id){
       var b=$("#"+id); if(b) b.addEventListener("click",function(){runNow(b);});
     });
   }
-  function stat(n,k,primary){
-    return "<div class='stat"+(primary?" primary":"")+"'><div class='n'>"+n+"</div><div class='k'>"+esc(k)+"</div></div>";
+
+  function dashboardHero(p,summary){
+    var lastRun = summary.last_run ? new Date(summary.last_run).toLocaleString() : "never";
+    return "<div class='hero'>"+
+      "<div class='hero-eyebrow'>"+esc(typeName(p.profile_type))+" &middot; last searched "+esc(lastRun)+"</div>"+
+      "<h1>AI searches for "+esc(p.display_name)+". You decide what gets sent.</h1>"+
+      "<p>It checks every new listing against your profile, drafts the application for "+
+      "anything you qualify for, and leaves it for you to read, edit and approve. "+
+      "Nothing is ever submitted without you.</p>"+
+      "<div class='hero-actions'>"+
+        "<button class='btn' id='run-now-btn' type='button'>Search now</button>"+
+        "<a class='btn ghost' href='#/review'>Go to review queue</a>"+
+      "</div></div>";
+  }
+
+  function dashboardStats(summary){
+    return "<div class='stat-row'>"+
+      statTile("amber","clock",summary.awaiting_review,"Awaiting your review")+
+      statTile("blue","search",summary.total,"Found in total")+
+      statTile("red","shieldOff",summary.not_eligible,"Judged not eligible")+
+      statTile("green","check",summary.approved,"Approved by you")+
+      statTile("purple","send",summary.submitted,"Marked submitted")+
+    "</div>";
+  }
+  function statTile(color,icon,n,label){
+    return "<div class='stat-tile "+color+"'><div class='icon-chip'>"+DASH_ICON[icon]+"</div>"+
+      "<div class='n'>"+n+"</div><div class='k'>"+esc(label)+"</div></div>";
+  }
+
+  function dashboardSourceTrouble(summary){
+    // A run that reached the source and found nothing, and a run that could
+    // not reach the source at all, look identical on a dashboard that only
+    // shows counts. They are not the same thing and the second is not the
+    // owner's fault, so it gets said out loud.
+    if(summary.last_run_failures && summary.last_run_failures.length){
+      return "<div class='advice blocked'><strong>The last search couldn't reach a source.</strong>"+
+        "<p class='muted' style='margin:4px 0 0;'>"+
+        esc(String(summary.last_run_failures[0]).slice(0,240))+"</p></div>";
+    }
+    if(summary.last_run && summary.last_run_found===0){
+      return "<div class='advice'><strong>The last search came back empty.</strong>"+
+        "<p class='muted' style='margin:4px 0 0;'>Nothing new was published, or the source was "+
+        "unavailable. Anything already found is still on "+
+        "<a href='#/opportunities'>All opportunities</a>.</p></div>";
+    }
+    if(summary.blockers && summary.blockers.length && summary.total && !summary.awaiting_review){
+      return "<div class='advice blocked'><strong>"+summary.blockers[0].count+" of "+
+        summary.total+" are waiting on one thing.</strong>"+
+        "<p class='muted' style='margin:4px 0 0;'>"+esc(blockerSentence(summary.blockers[0].reason))+
+        " <a href='#/profile'>Fix this on your profile</a></p></div>";
+    }
+    return "";
+  }
+
+  function dashboardLatestOpportunities(items){
+    var ranked = items.slice().sort(function(a,b){
+      if((a.match_status==="eligible")!==(b.match_status==="eligible")){
+        return a.match_status==="eligible" ? -1 : 1;
+      }
+      return (b.match_score||0)-(a.match_score||0);
+    }).slice(0,5);
+
+    return "<section class='panel'><div class='panel-head'><h2>Latest matching opportunities</h2>"+
+      "<a href='#/opportunities'>View all opportunities &rarr;</a></div>"+
+      (ranked.length ? ranked.map(oppRow).join("") :
+        "<p class='muted'>Nothing found yet. Run a search to get started.</p>")+
+      "</section>";
+  }
+  function oppRow(o){
+    var opp=o.payload||{};
+    var initial=(opp.title||"?").trim().charAt(0).toUpperCase();
+    var meta=[];
+    if(opp.source) meta.push(esc(opp.source));
+    if(opp.deadline) meta.push("Closes "+esc(opp.deadline));
+    return "<div class='opp-row' data-id='"+esc(o.id)+"'>"+
+      "<div class='opp-logo'>"+esc(initial)+"</div>"+
+      "<div class='opp-main'><strong>"+esc(opp.title||"Untitled")+"</strong>"+
+      "<div class='opp-meta'>"+meta.join(" &middot; ")+"</div></div>"+
+      (o.match_score ? "<span class='match-pill'>"+o.match_score+"% match</span>" : "")+
+      "<div class='opp-actions'><a class='btn small' href='#/opportunity/"+encodeURIComponent(o.id)+"'>Open</a></div>"+
+      "</div>";
+  }
+
+  function dashboardGoalsBanner(p){
+    var goals=(p.fields&&p.fields.goals)||[];
+    return "<div class='goals-banner'>"+
+      "<div class='left'><span class='g-icon'>"+DASH_ICON.target+"</span>"+
+      "<div><strong>Set your career goals</strong>"+
+      "<span>"+(goals.length ? esc(goals.join(", ")) : "Tell the agent what you're aiming for, and it will weigh matches accordingly.")+
+      "</span></div></div>"+
+      "<a class='btn plain' href='#/profile'>"+(goals.length?"Edit goals":"Set goals")+"</a>"+
+      "</div>";
+  }
+
+  function dashboardCompleteness(p,schema,docs){
+    if(!schema) return "";
+    var fields=(schema.fields||[]).slice(0,4);
+    var heldTypes={}; (docs||[]).forEach(function(d){heldTypes[d.doc_type]=true;});
+    var requiredDocs=(schema.documents||[]).filter(function(d){return d.required;});
+    var heldRequired=requiredDocs.filter(function(d){return heldTypes[d.key];});
+
+    var rows=fields.map(function(f){
+      var v=(p.fields||{})[f.key];
+      var done = v!=null && v!=="" && !(Array.isArray(v)&&v.length===0);
+      return {label:f.label, done:done};
+    });
+    if(requiredDocs.length) rows.push({
+      label:"Documents ("+heldRequired.length+"/"+requiredDocs.length+")",
+      done: heldRequired.length===requiredDocs.length,
+    });
+
+    var total=rows.length||1;
+    var done=rows.filter(function(r){return r.done;}).length;
+    var pct=Math.round(100*done/total);
+
+    return "<div class='side-card'><h2>Your profile <span class='muted' style='font-weight:400;'>"+
+      pct+"% complete</span></h2>"+
+      "<div class='progress-track'><div class='progress-fill' style='width:"+pct+"%;'></div></div>"+
+      rows.map(function(r){
+        return "<div class='complete-item'><span class='left'>"+
+          "<span class='tick "+(r.done?"done":"pending")+"'>"+
+          (r.done ? '<svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>' : "&middot;")+
+          "</span>"+esc(r.label)+"</span>"+
+          "<a href='#/profile'>"+(r.done?"Edit":"Add")+"</a></div>";
+      }).join("")+
+      "</div>";
+  }
+
+  function dashboardAgentCard(){
+    return "<div class='side-card agent-card'>"+
+      "<div class='agent-head'><span class='agent-icon'>"+DASH_ICON.robot+"</span>"+
+      "<div><strong>AI Agent</strong><div class='agent-status'><span class='dot'></span>Running</div></div></div>"+
+      "<p>Searches automatically on a schedule and drafts an application for anything "+
+      "you qualify for. Nothing is ever sent without you approving it first.</p>"+
+      "<button class='btn small plain' id='run-now-btn2' type='button'>Search now</button>"+
+      "</div>";
+  }
+
+  function dashboardActivity(){
+    var recent=state.notifications.slice(0,5);
+    return "<div class='side-card'><div class='panel-head'><h2>Recent activity</h2>"+
+      "<a href='#/notifications'>View all</a></div>"+
+      (recent.length ? recent.map(function(n){
+        return "<div class='activity-item'><span class='a-icon'>"+DASH_ICON.bell+"</span>"+
+          "<div class='a-body'><strong>"+esc(n.message)+"</strong></div>"+
+          "<span class='when'>"+esc(timeAgo(n.created_at))+"</span></div>";
+      }).join("") : "<p class='muted'>Nothing yet - this fills in as the agent works.</p>")+
+      "</div>";
   }
 
   async function runNow(btn){
@@ -2243,23 +2712,75 @@
     return renderOnboardStep3();
   }
 
-  function stepBar(n){
-    var labels=["Choose what to look for","Tell it about you","Let it start"];
-    return "<div class='steps'>"+labels.map(function(l,i){
-      var cls = n===i+1 ? "step active" : (n>i+1 ? "step done" : "step");
-      return "<div class='"+cls+"'>"+(i+1)+". "+esc(l)+"</div>";
-    }).join("")+"</div>";
+  var ONBOARD_TOTAL_STEPS = 3;
+
+  function onboardDots(n){
+    var dashes="";
+    for(var i=1;i<=ONBOARD_TOTAL_STEPS;i++){
+      dashes += "<span class='dash "+(i<n?"done":i===n?"active":"")+"'></span>";
+    }
+    return "<div class='onboard-dots'><span class='eyebrow'>Step "+n+" of "+ONBOARD_TOTAL_STEPS+
+      "</span><span class='dashes'>"+dashes+"</span></div>";
+  }
+
+  // The right-hand panel, reusing the same illustration chrome as the sign-in
+  // screen (glow + glass panel) so onboarding does not feel like a different
+  // product from the login it just came from.
+  function onboardIllustration(n){
+    var body =
+      n===1 ?
+        "<h2>One profile per pursuit.</h2>"+
+        "<p>Scholarships, jobs, grants and tenders each ask different questions "+
+        "and want different paperwork. Pick one now — you can add the others "+
+        "later from the same account.</p>"+
+        "<div class='steps-mini'>"+
+          "<div><svg viewBox='0 0 24 24'><path d='M20 6L9 17l-5-5'/></svg>Search on a schedule</div>"+
+          "<div><svg viewBox='0 0 24 24'><path d='M20 6L9 17l-5-5'/></svg>Check your eligibility</div>"+
+          "<div><svg viewBox='0 0 24 24'><path d='M20 6L9 17l-5-5'/></svg>Draft the application</div>"+
+          "<div><svg viewBox='0 0 24 24'><path d='M20 6L9 17l-5-5'/></svg>You review and send it</div>"+
+        "</div>"
+      : n===2 ?
+        "<h2>The more specific, the better it searches.</h2>"+
+        "<p>Everything here becomes part of what the agent looks for and what "+
+        "it checks each result against — nothing is shared beyond this "+
+        "account.</p>"+
+        "<div class='steps-mini'>"+
+          "<div><svg viewBox='0 0 24 24'><path d='M20 6L9 17l-5-5'/></svg>A country narrows a global search to what you can actually apply for</div>"+
+          "<div><svg viewBox='0 0 24 24'><path d='M20 6L9 17l-5-5'/></svg>A field or category decides which listings even get checked</div>"+
+          "<div><svg viewBox='0 0 24 24'><path d='M20 6L9 17l-5-5'/></svg>You can always come back and add more later</div>"+
+        "</div>"
+      :
+        "<h2>You're set up.</h2>"+
+        "<p>From here it works on its own — searching, checking eligibility, "+
+        "and drafting anything you qualify for. Nothing is ever sent without "+
+        "you reading it first.</p>"+
+        "<div class='steps-mini'>"+
+          "<div><svg viewBox='0 0 24 24'><path d='M20 6L9 17l-5-5'/></svg>You'll get a notification when something is ready</div>"+
+          "<div><svg viewBox='0 0 24 24'><path d='M20 6L9 17l-5-5'/></svg>Approve it, edit it, or say it's not for you</div>"+
+          "<div><svg viewBox='0 0 24 24'><path d='M20 6L9 17l-5-5'/></svg>You always submit it yourself, from the real portal</div>"+
+        "</div>";
+    return "<div class='glow'></div><div class='glow2'></div><div class='panel'>"+body+"</div>";
+  }
+
+  function onboardWrap(step,title,sub,body){
+    return "<div class='onboard-split'>"+
+      "<div class='onboard-form-col'><div class='onboard-form-inner'>"+
+      onboardDots(step)+
+      "<h1>"+esc(title)+"</h1>"+
+      (sub ? "<p class='muted' style='margin-bottom:22px;'>"+sub+"</p>" : "")+
+      body+
+      "</div></div>"+
+      "<div class='auth-illustration'>"+onboardIllustration(step)+"</div>"+
+      "</div>";
   }
 
   function renderOnboardStep1(existing){
     var available=TYPES.filter(function(t){return existing.indexOf(t.key)===-1;});
     if(!available.length){ location.hash="#/dashboard"; return; }
-    $("#view-root").innerHTML =
-      "<h1 class='view-title'>"+(state.profiles.length?"Add another profile":"Welcome to OpportunityAI")+"</h1>"+
-      "<p class='view-sub'>Each profile is searched separately, with its own questions and its own "+
-      "documents — a company bidding for tenders is asked for its compliance pack, not for a CV.</p>"+
-      stepBar(1)+
-      "<section class='panel'><h2>What should this profile look for?</h2>"+
+    $("#view-root").innerHTML = onboardWrap(1,
+      state.profiles.length?"Add another profile":"Welcome to OpportunityAI",
+      "Each profile is searched separately, with its own questions and its own "+
+      "documents — a company bidding for tenders is asked for its compliance pack, not for a CV.",
       "<div class='type-pick'>"+available.map(function(t){
         var who = t.subject==="organisation" ? "For your company"
                  : t.subject==="either" ? "You or your company" : "For you";
@@ -2267,7 +2788,7 @@
           "</strong><span>"+esc(t.blurb)+"</span>"+
           "<span class='who'>"+esc(who)+"</span></button>";}).join("")+"</div>"+
       "<div class='row' style='margin-top:20px;'><button class='btn' id='ob-next' type='button' disabled>Continue</button>"+
-      "<span class='status' id='ob-status'></span></div></section>";
+      "<span class='status' id='ob-status'></span></div>");
 
     var picked=null;
     $all(".type-card").forEach(function(card){
@@ -2298,20 +2819,18 @@
     var schema=await api("/profiles/"+onboarding.createdId+"/schema");
     var company = schema.subject==="organisation";
 
-    $("#view-root").innerHTML =
-      "<h1 class='view-title'>"+(company?"Tell it about your company":"Tell it about you")+"</h1>"+
-      "<p class='view-sub'>"+
-        (company
+    $("#view-root").innerHTML = onboardWrap(2,
+      company?"Tell it about your company":"Tell it about you",
+      (company
           ? "This is what it bids with. Your PRAZ supplier category codes matter most — they decide "+
             "which tenders you're actually allowed to bid on."
           : "This is what it searches with. You can upload a CV on the next screen and let it fill in "+
             "the rest.")+
         " For now, "+esc(((schema.fields.filter(function(x){return x.key==='name';})[0]||{}).label||'a name').toLowerCase())+
-        " is the only thing it can't work without.</p>"+
-      stepBar(2)+
-      "<section class='panel'><form id='profile-form'>"+profileFields(full,full.fields||{},schema)+
+        " is the only thing it can't work without.",
+      "<form id='profile-form'>"+profileFields(full,full.fields||{},schema)+
       "<div class='row' style='margin-top:18px;'><button class='btn' type='submit'>Save and continue</button>"+
-      "<span class='status' id='profile-status'></span></div></form></section>";
+      "<span class='status' id='profile-status'></span></div></form>");
 
     $("#profile-form").addEventListener("submit",async function(e){
       e.preventDefault();
@@ -2362,11 +2881,7 @@
 
     var uploadLabel = company ? "Upload company documents" : "Upload a CV first";
 
-    $("#view-root").innerHTML =
-      "<h1 class='view-title'>You're set up</h1>"+
-      "<p class='view-sub'>From here the agent works on its own.</p>"+
-      stepBar(3)+
-      "<section class='panel'><h2>What happens next</h2>"+
+    $("#view-root").innerHTML = onboardWrap(3, "You're set up", "From here the agent works on its own.",
       "<p class='muted'>It searches on a schedule using your profile, checks every result against your "+
       "eligibility, and writes a full application for anything you qualify for. You'll get a notification "+
       "when something is ready.</p>"+
@@ -2374,8 +2889,8 @@
       "anything on your behalf — you send it yourself from the portal, with everything already written.</p>"+
       "<div class='row' style='margin-top:18px;'>"+
       "<button class='btn' id='ob-finish' type='button'>Go to dashboard</button>"+
-      "<a class='btn plain' href='#/profile'>"+esc(uploadLabel)+"</a></div></section>"+
-      needsPanel;
+      "<a class='btn plain' href='#/profile'>"+esc(uploadLabel)+"</a></div>"+
+      needsPanel);
     $("#ob-finish").addEventListener("click",function(){ onboarding.step=1; location.hash="#/dashboard"; });
   }
 
@@ -2701,7 +3216,75 @@
       which==="sent"       ? "Account created" :
       which==="setpw"      ? "Choose your password" :
       which==="forgot"     ? "Reset your password" :
-      which==="forgotsent" ? "Password sent" : "Log in";
+      which==="forgotsent" ? "Password sent" : "Welcome back";
+    $("#auth-subheading").textContent =
+      which==="register" ? "Free to sign up. We'll email you a password to start with." :
+      which==="login"     ? "Finds opportunities while you're busy. You review what's worth sending." :
+      "";
+    // Google sign-in makes sense exactly where a password would be typed or
+    // chosen - not on the "check your email" or "choose a password" screens.
+    $("#google-btn-login").hidden = which!=="login";
+    $("#auth-divider-login").hidden = which!=="login";
+    $("#google-btn-register").hidden = which!=="register";
+    $("#auth-divider-register").hidden = which!=="register";
+    if(which==="login" || which==="register") renderGoogleButtons();
+  }
+
+  // ---------------- Google sign-in ----------------
+  var googleClientId = null;
+
+  async function loadGoogleConfig(){
+    try{
+      var config = await api("/auth/config");
+      googleClientId = config.google_client_id || null;
+    }catch(e){
+      googleClientId = null;
+    }
+    renderGoogleButtons();
+  }
+
+  var googleRenderAttempts = 0;
+  function renderGoogleButtons(){
+    var targets = [$("#google-btn-login"), $("#google-btn-register")];
+    if(!googleClientId){
+      targets.forEach(function(el){
+        el.dataset.state = "unconfigured";
+        el.textContent = "Google sign-in isn't set up yet. Continue with email below.";
+      });
+      return;
+    }
+    var ready = window.google && window.google.accounts && window.google.accounts.id;
+    if(!ready){
+      // The script loads async and may not have finished executing yet.
+      // Give it a few seconds before settling for "not available" - most of
+      // the time this fires once and the second attempt finds it ready.
+      googleRenderAttempts++;
+      if(googleRenderAttempts < 30){ setTimeout(renderGoogleButtons, 150); return; }
+      targets.forEach(function(el){
+        el.dataset.state = "unconfigured";
+        el.textContent = "Google sign-in couldn't load. Continue with email below.";
+      });
+      return;
+    }
+    window.google.accounts.id.initialize({
+      client_id: googleClientId,
+      callback: onGoogleCredential,
+    });
+    targets.forEach(function(el){
+      delete el.dataset.state;
+      el.innerHTML = "";
+      window.google.accounts.id.renderButton(el, {
+        theme:"outline", size:"large", shape:"rectangular", width:"100%",
+      });
+    });
+  }
+
+  async function onGoogleCredential(response){
+    try{
+      await api("/login/google",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({credential:response.credential})});
+      await checkAuth();
+    }catch(err){ showError(err.message); }
   }
 
   $("#login-form").addEventListener("submit",async function(e){
@@ -2821,6 +3404,7 @@
   }
 
   checkAuth();
+  loadGoogleConfig();
 })();
 </script>
 

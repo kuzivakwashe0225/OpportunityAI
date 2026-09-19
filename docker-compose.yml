@@ -38,6 +38,12 @@ services:
       # anything rather than falling back to plaintext, so the rest of the app
       # runs fine without it. Deliberately NOT `:?` for that reason.
       CREDENTIALS_SECRET_KEY: ${CREDENTIALS_SECRET_KEY:-}
+      # Sign in with Google. Unset is a valid state - /auth/config reports it
+      # as absent and the sign-in page shows the button as not configured
+      # rather than broken, the same degrade-not-crash pattern as the two
+      # keys above. No secret is needed: the browser proves identity with a
+      # token this server verifies for itself (google_auth.py).
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       # Outbound mail for new-account passwords. Unset means registration
       # returns 503 rather than creating accounts whose password was never
       # delivered - see mailer.py. Everything else runs fine without it.

@@ -50,6 +50,16 @@ class Account(Base):
     # expires is just a permanent password with worse handling.
     temp_password_expires_at: Mapped[datetime | None] = mapped_column(default=None)
     password_set_at: Mapped[datetime | None] = mapped_column(default=None)
+    # Set once this account has signed in with Google. Nullable rather than a
+    # boolean plus a separate id column, because both facts travel together -
+    # there is never a `google_subject` without knowing it came from Google.
+    #
+    # Looked up by subject first (it never changes) and by email second (to
+    # link a Google sign-in onto an account that registered with a password
+    # the ordinary way - safe because Google has itself verified the email,
+    # the same trust an email-verification link would establish).
+    oauth_provider: Mapped[str | None] = mapped_column(String(20), default=None)
+    oauth_subject: Mapped[str | None] = mapped_column(String(255), default=None)
     created_at: Mapped[datetime] = mapped_column(default=_now)
 
     profiles: Mapped[list["Profile"]] = relationship(

@@ -79,6 +79,9 @@ PUBLIC_ROUTES = {
     ("POST", "/register"), ("POST", "/login"), ("POST", "/logout"),
     ("POST", "/forgot-password"),
     ("GET", "/profile-types"),
+    # A signed Google credential proves identity on its own, the same way a
+    # password does in /login - neither needs a session to present first.
+    ("GET", "/auth/config"), ("POST", "/login/google"),
     # FastAPI's own documentation pages.
     ("GET", "/docs"), ("GET", "/docs/oauth2-redirect"), ("GET", "/redoc"),
     ("GET", "/openapi.json"),
@@ -153,7 +156,7 @@ def test_the_public_list_is_not_quietly_growing():
     Someone adding a public route has to come here and say so. Without this,
     the exemption list above is a place things can be slipped into.
     """
-    assert len(PUBLIC_ROUTES) == 14
+    assert len(PUBLIC_ROUTES) == 16
     assert len(PROTECTED) == 37
 
 
