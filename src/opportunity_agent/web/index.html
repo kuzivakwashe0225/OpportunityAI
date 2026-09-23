@@ -56,6 +56,18 @@
     --info:#1d5fa8; --info-soft:#e3ecf7; --purple:#6d4aa8; --purple-soft:#eee7f7;
   }
   *{box-sizing:border-box;}
+  /* The bug behind both "the dashboard shows before login" and "two dividers
+     on the sign-in card": several elements toggled by JS's `.hidden` property
+     (#app-shell, #auth-view, .auth-divider) also carry their own
+     `display:flex` rule. The browser's own [hidden]{display:none} default is
+     user-agent-origin CSS, and author CSS always wins a tie on the same
+     property regardless of which selector is "more specific" - so
+     `#app-shell{display:flex}` silently overrode `hidden`, and the app shell
+     stayed visually present, full height, underneath the auth screen the
+     whole time. One `!important` rule here outranks every other display rule
+     in this file and makes `hidden` mean hidden again, for every element,
+     including ones added after this comment.*/
+  [hidden]{display:none!important;}
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,
     "Helvetica Neue",Arial,sans-serif;color:var(--ink);background:var(--bg);
     -webkit-font-smoothing:antialiased;}
@@ -78,8 +90,8 @@
   label{display:block;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.8rem;
     color:var(--ink-soft);margin:14px 0 5px;}
   input[type=text],input[type=password],input[type=number],select,textarea{
-    width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:5px;
-    font-size:.94rem;background:#fff;color:var(--ink);}
+    width:100%;padding:13px 15px;border:1px solid var(--line);border-radius:8px;
+    font-size:1rem;line-height:1.3;background:#fff;color:var(--ink);}
   textarea{min-height:72px;resize:vertical;}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 18px;}
@@ -213,7 +225,10 @@
   .auth-divider::before,.auth-divider::after{content:"";flex:1;height:1px;background:var(--line);}
 
   .auth-illustration{flex:1;min-width:0;background:var(--accent-strong);position:relative;
-    overflow:hidden;display:flex;align-items:center;justify-content:center;padding:40px;}
+    overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:22px;padding:40px;}
+  .auth-illustration .bag-art{position:relative;width:100%;max-width:250px;height:auto;
+    filter:drop-shadow(0 20px 32px rgba(0,0,0,.28));}
   .auth-illustration .glow{position:absolute;width:520px;height:520px;border-radius:50%;
     background:radial-gradient(circle,rgba(255,255,255,.10),transparent 70%);top:-120px;right:-140px;}
   .auth-illustration .glow2{position:absolute;width:420px;height:420px;border-radius:50%;
@@ -656,6 +671,66 @@
   </div>
   <div class="auth-illustration">
     <div class="glow"></div><div class="glow2"></div>
+    <svg class="bag-art" viewBox="0 0 240 210" aria-hidden="true">
+      <!-- An open bag, opportunities spilling out of it: a scholarship, a
+           tender, a job and a grant, each as a small hand-drawn icon rather
+           than a stock photo - nothing here claims to be a real person or a
+           real document. -->
+      <g opacity=".55" stroke="#bff0d4" stroke-width="1.4" stroke-linecap="round">
+        <path d="M28 46l6 6M34 46l-6 6"/>
+        <path d="M206 34l7 7M213 34l-7 7"/>
+        <circle cx="210" cy="96" r="2.4" fill="#bff0d4" stroke="none"/>
+        <circle cx="24" cy="108" r="2" fill="#bff0d4" stroke="none"/>
+      </g>
+      <!-- the open bag -->
+      <g stroke="#eafff2" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" fill="none">
+        <path d="M96 100c0-16 8-24 24-24s24 8 24 24" opacity=".8"/>
+        <path d="M66 108l6-14a10 10 0 0 1 9-6h78a10 10 0 0 1 9 6l6 14"/>
+        <path d="M62 108h116l-7 60a12 12 0 0 1-12 10H81a12 12 0 0 1-12-10z"
+              fill="#0c3423"/>
+        <path d="M62 108h116" opacity=".7"/>
+      </g>
+      <!-- opportunities spilling upward out of the bag -->
+      <g>
+        <circle cx="88" cy="60" r="19" fill="rgba(255,255,255,.10)" stroke="rgba(255,255,255,.35)"/>
+        <g transform="translate(88,60)" stroke="#eafff2" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M-9-3l9-4 9 4-9 4z"/>
+          <path d="M-5-1v6c0 1.6 4 3 5 3s5-1.4 5-3v-6"/>
+          <path d="M9-3v6"/>
+        </g>
+        <text x="88" y="88" text-anchor="middle" font-size="8.5" fill="rgba(255,255,255,.75)" font-family="inherit">Scholarship</text>
+      </g>
+      <g>
+        <circle cx="152" cy="46" r="19" fill="rgba(255,255,255,.10)" stroke="rgba(255,255,255,.35)"/>
+        <g transform="translate(152,46)" stroke="#eafff2" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M-6-8h9l3 3v13h-12z"/>
+          <path d="M-3-8v3"/>
+          <path d="M-3-1h9M-3 2h9M-3 5h6"/>
+        </g>
+        <text x="152" y="74" text-anchor="middle" font-size="8.5" fill="rgba(255,255,255,.75)" font-family="inherit">Tender</text>
+      </g>
+      <g>
+        <circle cx="120" cy="26" r="17" fill="rgba(255,255,255,.13)" stroke="rgba(255,255,255,.4)"/>
+        <path transform="translate(120,26)" stroke="#eafff2" stroke-width="1.7" fill="none" stroke-linejoin="round"
+              d="M0-8l2.2 4.6 5 .7-3.6 3.6.9 5-4.5-2.4-4.5 2.4.9-5-3.6-3.6 5-.7z"/>
+      </g>
+      <g>
+        <circle cx="182" cy="80" r="15" fill="rgba(255,255,255,.10)" stroke="rgba(255,255,255,.35)"/>
+        <g transform="translate(182,80)" stroke="#eafff2" stroke-width="1.6" fill="none">
+          <circle r="7"/>
+          <path d="M-2.4 0h4.8M0-2.4v4.8" stroke-linecap="round"/>
+        </g>
+        <text x="182" y="103" text-anchor="middle" font-size="8.5" fill="rgba(255,255,255,.75)" font-family="inherit">Grant</text>
+      </g>
+      <g>
+        <circle cx="56" cy="84" r="15" fill="rgba(255,255,255,.10)" stroke="rgba(255,255,255,.35)"/>
+        <g transform="translate(56,84)" stroke="#eafff2" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="-7" y="-3" width="14" height="10" rx="1.5"/>
+          <path d="M-3-3v-2a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/>
+        </g>
+        <text x="56" y="107" text-anchor="middle" font-size="8.5" fill="rgba(255,255,255,.75)" font-family="inherit">Job</text>
+      </g>
+    </svg>
     <div class="panel">
       <h2>AI searches. You approve.</h2>
       <p>It checks scholarships, jobs, grants and tenders against your profile
