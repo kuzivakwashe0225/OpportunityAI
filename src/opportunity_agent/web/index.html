@@ -70,7 +70,16 @@
   [hidden]{display:none!important;}
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,
     "Helvetica Neue",Arial,sans-serif;color:var(--ink);background:var(--bg);
-    -webkit-font-smoothing:antialiased;}
+    -webkit-font-smoothing:antialiased;overflow-wrap:break-word;}
+  /* A long unbroken string - an emailed address is the recurring one - has no
+     natural break point, so without this it can force its container (and,
+     through it, the whole page's layout viewport) wider than the screen.
+     Mobile browsers respond to that by zooming the entire page out to fit,
+     which is what turns "no account yet, create one" or "check your email"
+     into a tiny, mis-scaled desktop layout on a phone - not a rigid-layout
+     bug so much as one long word upstream of it. overflow-wrap is inherited,
+     so setting it once here covers every screen, not just the ones already
+     known to show an email back to the user. */
   h1,h2,h3{font-weight:700;letter-spacing:-.01em;}
   button{font-family:ui-sans-serif,system-ui,sans-serif;cursor:pointer;}
   input,select,textarea{font-family:ui-sans-serif,system-ui,sans-serif;}
@@ -210,10 +219,10 @@
     font-size:.78rem;color:var(--warn);margin-top:2px;}
 
   /* ---------- auth: split screen ---------- */
-  #auth-view{display:flex;min-height:100vh;background:var(--surface);}
+  #auth-view{display:flex;min-height:100vh;background:var(--bg);}
   .auth-form-col{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;
     padding:40px 24px;}
-  .auth-form-inner{width:100%;max-width:392px;}
+  .auth-form-inner{width:100%;max-width:440px;}
   #auth-view .brand-row{display:flex;align-items:center;gap:10px;margin-bottom:34px;}
   #auth-view .brand-row .mark{width:32px;height:32px;border-radius:8px;background:var(--accent-strong);
     display:grid;place-items:center;flex:none;}
@@ -221,18 +230,16 @@
     stroke-linecap:round;stroke-linejoin:round;}
   #auth-view .brand-row .brand{font-size:1.15rem;font-weight:700;color:var(--ink);}
   #auth-view h1{font-size:1.7rem;margin-bottom:6px;font-weight:700;}
-  .card{background:transparent;border:none;border-radius:0;padding:0;}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;
+    padding:28px 26px;box-shadow:var(--lift-1);}
 
   .google-btn-wrap{margin:22px 0 4px;min-height:40px;}
-  .google-btn-wrap[data-state="unconfigured"]{
-    border:1px dashed var(--line);border-radius:7px;padding:10px 12px;
-    font-size:.82rem;color:var(--ink-soft);}
   .auth-divider{display:flex;align-items:center;gap:12px;margin:20px 0;
     font-size:.76rem;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.08em;}
   .auth-divider::before,.auth-divider::after{content:"";flex:1;height:1px;background:var(--line);}
 
   .auth-illustration{flex:1;min-width:0;background:
-      linear-gradient(180deg,rgba(8,34,23,.08) 0%,rgba(8,34,23,.28) 42%,rgba(7,28,19,.82) 76%,rgba(6,24,17,.93) 100%),
+      linear-gradient(180deg,rgba(26,20,12,.05) 0%,rgba(24,19,12,.24) 40%,rgba(15,20,15,.8) 75%,rgba(7,28,19,.93) 100%),
       url('/assets/login-bag.jpg') center/cover no-repeat;
     background-color:var(--accent-strong);position:relative;
     overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;
@@ -3522,13 +3529,21 @@
   }
 
   var googleRenderAttempts = 0;
+  // Pairs a button slot with the divider above it, so that when Google
+  // sign-in isn't available (unconfigured, or the script failed to load)
+  // both disappear together - a "Google sign-in isn't set up yet" notice
+  // was clutter a real end user has no use for; unavailable just means the
+  // page goes straight to the email/password form, nothing to explain.
+  var googleSlots = [
+    {btn:"#google-btn-login", divider:"#auth-divider-login"},
+    {btn:"#google-btn-register", divider:"#auth-divider-register"}
+  ];
   function renderGoogleButtons(){
-    var targets = [$("#google-btn-login"), $("#google-btn-register")];
+    var targets = googleSlots.map(function(s){
+      return {btn:$(s.btn), divider:$(s.divider)};
+    });
     if(!googleClientId){
-      targets.forEach(function(el){
-        el.dataset.state = "unconfigured";
-        el.textContent = "Google sign-in isn't set up yet. Continue with email below.";
-      });
+      targets.forEach(function(t){ t.btn.hidden = true; t.divider.hidden = true; });
       return;
     }
     var ready = window.google && window.google.accounts && window.google.accounts.id;
@@ -3538,20 +3553,17 @@
       // the time this fires once and the second attempt finds it ready.
       googleRenderAttempts++;
       if(googleRenderAttempts < 30){ setTimeout(renderGoogleButtons, 150); return; }
-      targets.forEach(function(el){
-        el.dataset.state = "unconfigured";
-        el.textContent = "Google sign-in couldn't load. Continue with email below.";
-      });
+      targets.forEach(function(t){ t.btn.hidden = true; t.divider.hidden = true; });
       return;
     }
     window.google.accounts.id.initialize({
       client_id: googleClientId,
       callback: onGoogleCredential,
     });
-    targets.forEach(function(el){
-      delete el.dataset.state;
-      el.innerHTML = "";
-      window.google.accounts.id.renderButton(el, {
+    targets.forEach(function(t){
+      delete t.btn.dataset.state;
+      t.btn.innerHTML = "";
+      window.google.accounts.id.renderButton(t.btn, {
         theme:"outline", size:"large", shape:"rectangular", width:"100%",
       });
     });
