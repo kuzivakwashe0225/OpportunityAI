@@ -1,5 +1,6 @@
 import os
 import secrets
+import traceback
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -8,7 +9,7 @@ import jwt
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Form, Request, Response, UploadFile
 from fastapi import HTTPException
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -63,6 +64,20 @@ HSTS_ENABLED = os.getenv("HSTS_ENABLED", "").lower() in ("1", "true", "yes")
 # configured rather than a broken one, exactly the way SESSION_COOKIE_SECURE
 # and CREDENTIALS_SECRET_KEY already degrade rather than crash the app.
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+
+# Who can reach /admin/*. Set from the environment rather than a database flag
+# someone has to remember to flip by hand - the owner controls this by
+# editing .env, the same pattern as every other trust decision in this file.
+# Comma-separated, case-insensitive.
+ADMIN_EMAILS = {
+    e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()
+}
+
+# How stale last_seen_at is allowed to get before a request bothers updating
+# it. Five minutes is accurate enough to answer "who is using this right
+# now" during a beta test, without a write on every single API call - this
+# endpoint alone is called on nearly every page interaction.
+_ACTIVITY_TOUCH_INTERVAL = timedelta(minutes=5)
 
 
 @app.middleware("http")
@@ -177,6 +192,10 @@ class AccountOut(BaseModel):
     password_set_at: datetime | None = None
     temp_password_expires_at: datetime | None = None
     created_at: datetime | None = None
+    # So the frontend knows whether to show the admin dashboard link at all -
+    # the actual boundary is still server-side (require_admin below), this is
+    # only about not showing a menu item that would 404.
+    is_admin: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -215,6 +234,45 @@ def get_current_account(
     account = db.get(models_db.Account, account_id)
     if account is None:
         raise HTTPException(status_code=401, detail="account not found")
+    _touch_account_activity(account, db)
+    return account
+
+
+def _touch_account_activity(account: models_db.Account, db: Session) -> None:
+    """Keep last_seen_at roughly current, and pick up an admin grant from
+    ADMIN_EMAILS the moment it appears in the environment - self-healing from
+    config, like the rest of this file's optional features, rather than a
+    one-off change made directly against the live database.
+
+    Never on the critical path of the request that called it: a failure here
+    must not turn "reading the dashboard" into a 500.
+    """
+    try:
+        now = datetime.now(timezone.utc)
+        dirty = False
+        if account.email.lower() in ADMIN_EMAILS and not account.is_admin:
+            account.is_admin = True
+            dirty = True
+        last_seen = account.last_seen_at
+        if last_seen is not None and last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        if last_seen is None or (now - last_seen) > _ACTIVITY_TOUCH_INTERVAL:
+            account.last_seen_at = now
+            dirty = True
+        if dirty:
+            db.commit()
+    except Exception:
+        db.rollback()
+
+
+def require_admin(
+    account: models_db.Account = Depends(get_current_account),
+) -> models_db.Account:
+    """Same discipline as every other ownership check in this file: a
+    stranger asking for something they may not have gets 404, not 403 - a 403
+    would confirm the admin dashboard exists at all."""
+    if not account.is_admin:
+        raise HTTPException(status_code=404, detail="not found")
     return account
 
 
@@ -2290,6 +2348,415 @@ def mark_notification_read(
     notification.read_at = datetime.now(timezone.utc)
     db.commit()
     return notification
+
+
+# --------------------------------------------------------------------------
+# Feedback and issue reporting
+# --------------------------------------------------------------------------
+# Two different things that end up on the same admin screen. Feedback is
+# voluntary - a person chose to write it, so it keeps a conversation-shaped
+# status (new/seen/resolved) and a place for a reply. An issue report is the
+# system noticing its own fault - a client exception, a failed request, an
+# unhandled server error - captured automatically so the developer does not
+# depend on someone noticing, understanding, and bothering to describe what
+# went wrong. Half the value of a real beta test is the failures nobody
+# would ever have reported.
+
+_FEEDBACK_CATEGORIES = {"bug", "idea", "confusing", "other"}
+_MAX_FEEDBACK_MESSAGE = 4000
+_MAX_ISSUE_MESSAGE = 500
+_MAX_ISSUE_DETAIL = 4000
+
+
+class FeedbackIn(BaseModel):
+    category: str = "other"
+    message: str
+    route: str | None = None
+
+
+class FeedbackOut(BaseModel):
+    id: str
+    account_id: str
+    submitter_email: str | None = None
+    profile_id: str | None = None
+    category: str
+    message: str
+    route: str | None = None
+    status: str
+    admin_note: str | None = None
+    created_at: datetime
+    resolved_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+@app.post("/feedback", response_model=FeedbackOut, status_code=201)
+def submit_feedback(
+    payload: FeedbackIn,
+    account: models_db.Account = Depends(get_current_account),
+    db: Session = Depends(get_db_session),
+) -> models_db.Feedback:
+    """A tester telling us something, from wherever they were when they
+    noticed it. `route` is the SPA's own hash - the single most useful piece
+    of context for "what were you looking at", and free: the page already
+    knows it and sends it along."""
+    category = payload.category.strip().lower()
+    if category not in _FEEDBACK_CATEGORIES:
+        category = "other"
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="feedback message is required")
+
+    active_profile_id = None
+    if db.query(models_db.Profile).filter_by(account_id=account.id).count() == 1:
+        # Only when it is unambiguous. Guessing wrong here would attach
+        # someone's feedback to the wrong profile, which is worse than
+        # leaving it blank.
+        active_profile_id = db.query(models_db.Profile.id).filter_by(
+            account_id=account.id).scalar()
+
+    row = models_db.Feedback(
+        account_id=account.id,
+        profile_id=active_profile_id,
+        category=category,
+        message=message[:_MAX_FEEDBACK_MESSAGE],
+        route=(payload.route or "")[:200] or None,
+    )
+    db.add(row)
+    db.commit()
+    return row
+
+
+class IssueIn(BaseModel):
+    message: str
+    detail: str | None = None
+    route: str | None = None
+
+
+@app.post("/issues/client", status_code=202)
+def report_client_issue(
+    payload: IssueIn,
+    request: Request,
+    db: Session = Depends(get_db_session),
+    session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> dict[str, str]:
+    """The page telling us it broke, on its own, without anyone reporting it.
+
+    Deliberately reachable while signed out - the sign-in screen is not
+    exempt from bugs, and an error there is exactly the kind a tester would
+    never think to mention. Throttled by caller address rather than by
+    account for that reason: there may be no account yet.
+    """
+    address = throttle_module.client_address(request)
+    key = f"addr:{address}"
+    wait = throttle_module.issue_report_by_address.retry_after(key)
+    if wait:
+        raise _too_many(wait)
+    throttle_module.issue_report_by_address.record_failure(key)
+
+    account_id = None
+    if session:
+        try:
+            account_id = auth_module.decode_session_token(session)
+            if db.get(models_db.Account, account_id) is None:
+                account_id = None
+        except jwt.PyJWTError:
+            account_id = None
+
+    db.add(models_db.IssueReport(
+        source="client",
+        account_id=account_id,
+        route=(payload.route or "")[:200] or None,
+        message=payload.message.strip()[:_MAX_ISSUE_MESSAGE] or "(no message)",
+        detail=(payload.detail or "").strip()[:_MAX_ISSUE_DETAIL] or None,
+        user_agent=(request.headers.get("user-agent") or "")[:300] or None,
+    ))
+    db.commit()
+    return {"status": "recorded"}
+
+
+def _record_server_issue(request: Request, error: Exception) -> None:
+    """Best-effort. A failure while logging a failure must never replace the
+    original error with a worse, more confusing one."""
+    try:
+        db = db_module.SessionLocal()
+        try:
+            account_id = None
+            token = request.cookies.get(SESSION_COOKIE)
+            if token:
+                try:
+                    candidate = auth_module.decode_session_token(token)
+                    if db.get(models_db.Account, candidate) is not None:
+                        account_id = candidate
+                except jwt.PyJWTError:
+                    pass
+            db.add(models_db.IssueReport(
+                source="server",
+                account_id=account_id,
+                route=str(request.url.path)[:200],
+                method=request.method[:10],
+                status_code=500,
+                message=f"{type(error).__name__}: {error}"[:_MAX_ISSUE_MESSAGE],
+                detail=traceback.format_exc()[-_MAX_ISSUE_DETAIL:],
+                user_agent=(request.headers.get("user-agent") or "")[:300] or None,
+            ))
+            db.commit()
+        finally:
+            db.close()
+    except Exception:
+        pass
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    """Every unhandled fault lands here once, is written to the same table
+    the admin issue feed reads, and still answers the caller with a plain
+    500 - nothing about what actually failed is ever exposed to whoever
+    triggered it, only to /admin/issues."""
+    _record_server_issue(request, exc)
+    return JSONResponse(status_code=500, content={"detail": "internal server error"})
+
+
+# --------------------------------------------------------------------------
+# Admin: beta-test monitoring
+# --------------------------------------------------------------------------
+
+class AdminOverviewOut(BaseModel):
+    total_accounts: int
+    active_today: int
+    active_7d: int
+    total_profiles: int
+    total_opportunities: int
+    total_drafted: int
+    total_approved: int
+    total_submitted: int
+    total_documents: int
+    open_feedback: int
+    open_issues: int
+    last_discovery_run: datetime | None = None
+
+
+@app.get("/admin/overview", response_model=AdminOverviewOut)
+def admin_overview(
+    admin: models_db.Account = Depends(require_admin),
+    db: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    now = datetime.now(timezone.utc)
+    today = now - timedelta(hours=24)
+    week = now - timedelta(days=7)
+
+    last_run = (
+        db.query(models_db.ProfileDiscoveryRun)
+        .order_by(models_db.ProfileDiscoveryRun.completed_at.desc())
+        .first()
+    )
+
+    return {
+        "total_accounts": db.query(models_db.Account).count(),
+        "active_today": db.query(models_db.Account)
+            .filter(models_db.Account.last_seen_at >= today).count(),
+        "active_7d": db.query(models_db.Account)
+            .filter(models_db.Account.last_seen_at >= week).count(),
+        "total_profiles": db.query(models_db.Profile).count(),
+        "total_opportunities": db.query(models_db.StoredOpportunity)
+            .filter(models_db.StoredOpportunity.deleted_at.is_(None)).count(),
+        "total_drafted": db.query(models_db.StoredOpportunity)
+            .filter(models_db.StoredOpportunity.stage == "drafted").count(),
+        "total_approved": db.query(models_db.StoredOpportunity)
+            .filter(models_db.StoredOpportunity.stage == "approved").count(),
+        "total_submitted": db.query(models_db.StoredOpportunity)
+            .filter(models_db.StoredOpportunity.stage == "submitted").count(),
+        "total_documents": db.query(models_db.Document).count(),
+        "open_feedback": db.query(models_db.Feedback)
+            .filter(models_db.Feedback.status != "resolved").count(),
+        "open_issues": db.query(models_db.IssueReport)
+            .filter(models_db.IssueReport.resolved.is_(False)).count(),
+        "last_discovery_run": last_run.completed_at if last_run else None,
+    }
+
+
+class AdminUserOut(BaseModel):
+    id: str
+    email: str
+    created_at: datetime
+    last_seen_at: datetime | None = None
+    is_admin: bool
+    profile_count: int
+    document_count: int
+    opportunity_count: int
+    submitted_count: int
+    feedback_count: int
+
+
+@app.get("/admin/users", response_model=list[AdminUserOut])
+def admin_users(
+    admin: models_db.Account = Depends(require_admin),
+    db: Session = Depends(get_db_session),
+) -> list[dict[str, object]]:
+    """One row per real person who has signed up, most recently active
+    first - the question a developer watching a beta test actually asks is
+    "who is using this right now", not "who signed up first"."""
+    accounts = db.query(models_db.Account).all()
+
+    def sort_key(account):
+        # SQLite and Postgres do not agree on naive vs aware, and an account
+        # never seen has no value to compare at all - sort_key must accept
+        # all three without a naive/aware comparison ever reaching Python's
+        # datetime operators.
+        seen = account.last_seen_at
+        if seen is None:
+            return (0, "")
+        if seen.tzinfo is None:
+            seen = seen.replace(tzinfo=timezone.utc)
+        return (1, seen.isoformat())
+
+    accounts.sort(key=sort_key, reverse=True)
+
+    out = []
+    for account in accounts:
+        profile_ids = [
+            p.id for p in db.query(models_db.Profile.id)
+            .filter_by(account_id=account.id).all()
+        ]
+        document_count = (
+            db.query(models_db.Document)
+            .filter(models_db.Document.profile_id.in_(profile_ids)).count()
+            if profile_ids else 0
+        )
+        opportunity_count = (
+            db.query(models_db.StoredOpportunity)
+            .filter(models_db.StoredOpportunity.profile_id.in_(profile_ids))
+            .filter(models_db.StoredOpportunity.deleted_at.is_(None)).count()
+            if profile_ids else 0
+        )
+        submitted_count = (
+            db.query(models_db.StoredOpportunity)
+            .filter(models_db.StoredOpportunity.profile_id.in_(profile_ids))
+            .filter(models_db.StoredOpportunity.stage == "submitted").count()
+            if profile_ids else 0
+        )
+        out.append({
+            "id": account.id, "email": account.email, "created_at": account.created_at,
+            "last_seen_at": account.last_seen_at, "is_admin": account.is_admin,
+            "profile_count": len(profile_ids), "document_count": document_count,
+            "opportunity_count": opportunity_count, "submitted_count": submitted_count,
+            "feedback_count": db.query(models_db.Feedback)
+                .filter_by(account_id=account.id).count(),
+        })
+    return out
+
+
+@app.get("/admin/feedback", response_model=list[FeedbackOut])
+def admin_list_feedback(
+    status: str | None = None,
+    admin: models_db.Account = Depends(require_admin),
+    db: Session = Depends(get_db_session),
+) -> list[dict[str, object]]:
+    query = db.query(models_db.Feedback)
+    if status:
+        query = query.filter_by(status=status)
+    rows = query.order_by(models_db.Feedback.created_at.desc()).limit(500).all()
+    emails = {
+        a.id: a.email for a in
+        db.query(models_db.Account).filter(
+            models_db.Account.id.in_([r.account_id for r in rows])
+        ).all()
+    } if rows else {}
+    out = []
+    for row in rows:
+        out.append({
+            "id": row.id, "account_id": row.account_id,
+            "submitter_email": emails.get(row.account_id),
+            "profile_id": row.profile_id, "category": row.category,
+            "message": row.message, "route": row.route, "status": row.status,
+            "admin_note": row.admin_note, "created_at": row.created_at,
+            "resolved_at": row.resolved_at,
+        })
+    return out
+
+
+class FeedbackStatusIn(BaseModel):
+    status: str
+    admin_note: str | None = None
+
+
+@app.put("/admin/feedback/{feedback_id}", response_model=FeedbackOut)
+def admin_update_feedback(
+    feedback_id: str,
+    payload: FeedbackStatusIn,
+    admin: models_db.Account = Depends(require_admin),
+    db: Session = Depends(get_db_session),
+) -> models_db.Feedback:
+    row = db.get(models_db.Feedback, feedback_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="feedback not found")
+    status = payload.status.strip().lower()
+    if status not in {"new", "seen", "resolved"}:
+        raise HTTPException(status_code=422, detail="status must be new, seen or resolved")
+    row.status = status
+    row.resolved_at = datetime.now(timezone.utc) if status == "resolved" else None
+    if payload.admin_note is not None:
+        row.admin_note = payload.admin_note.strip() or None
+    db.commit()
+    return row
+
+
+class IssueOut(BaseModel):
+    id: str
+    source: str
+    account_id: str | None = None
+    reporter_email: str | None = None
+    route: str | None = None
+    method: str | None = None
+    status_code: int | None = None
+    message: str
+    detail: str | None = None
+    resolved: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+@app.get("/admin/issues", response_model=list[IssueOut])
+def admin_list_issues(
+    resolved: bool = False,
+    source: str | None = None,
+    admin: models_db.Account = Depends(require_admin),
+    db: Session = Depends(get_db_session),
+) -> list[dict[str, object]]:
+    query = db.query(models_db.IssueReport).filter_by(resolved=resolved)
+    if source:
+        query = query.filter_by(source=source)
+    rows = query.order_by(models_db.IssueReport.created_at.desc()).limit(500).all()
+    account_ids = [r.account_id for r in rows if r.account_id]
+    emails = {
+        a.id: a.email for a in
+        db.query(models_db.Account).filter(models_db.Account.id.in_(account_ids)).all()
+    } if account_ids else {}
+    out = []
+    for row in rows:
+        out.append({
+            "id": row.id, "source": row.source, "account_id": row.account_id,
+            "reporter_email": emails.get(row.account_id), "route": row.route,
+            "method": row.method, "status_code": row.status_code,
+            "message": row.message, "detail": row.detail, "resolved": row.resolved,
+            "created_at": row.created_at,
+        })
+    return out
+
+
+@app.post("/admin/issues/{issue_id}/resolve", response_model=IssueOut)
+def admin_resolve_issue(
+    issue_id: str,
+    admin: models_db.Account = Depends(require_admin),
+    db: Session = Depends(get_db_session),
+) -> models_db.IssueReport:
+    row = db.get(models_db.IssueReport, issue_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="issue not found")
+    row.resolved = True
+    db.commit()
+    return row
 
 
 @app.get("/ui", response_class=HTMLResponse)

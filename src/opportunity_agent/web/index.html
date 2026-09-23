@@ -131,6 +131,13 @@
   /* ---------- session warning ---------- */
   #session-warning{position:fixed;inset:0;z-index:60;display:grid;place-items:center;}
   #session-warning[hidden]{display:none;}
+  #feedback-btn{position:fixed;right:22px;bottom:22px;z-index:40;display:flex;align-items:center;
+    gap:8px;background:var(--accent-strong);color:#fff;border:none;padding:12px 18px;
+    border-radius:999px;font-size:.88rem;font-weight:600;box-shadow:var(--lift-3);}
+  #feedback-btn svg{width:17px;height:17px;stroke:#fff;fill:none;stroke-width:1.8;
+    stroke-linecap:round;stroke-linejoin:round;}
+  #feedback-btn:hover{filter:brightness(1.08);}
+  #feedback-modal{position:fixed;inset:0;z-index:61;display:grid;place-items:center;}
   .modal-scrim{position:absolute;inset:0;background:rgba(29,38,32,.55);}
   .modal-box{position:relative;background:var(--surface);border:1px solid var(--line);
     border-radius:10px;padding:26px;max-width:430px;width:calc(100% - 40px);
@@ -550,6 +557,13 @@
   .goals-banner strong{display:block;font-size:.92rem;}
   .goals-banner span{display:block;font-size:.82rem;color:var(--ink-soft);}
 
+  /* ---------- admin ---------- */
+  .admin-item{border-bottom:1px solid var(--line);padding:12px 0;}
+  .admin-item:last-child{border-bottom:none;}
+  .admin-item-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
+  .admin-item p{margin:0;font-size:.9rem;}
+  .admin-item .when{font-size:.76rem;color:var(--ink-faint);}
+
   /* ---------- documents / notifications ---------- */
   table{width:100%;border-collapse:collapse;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.87rem;}
   th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);}
@@ -761,6 +775,39 @@
   </div>
 </div>
 
+<!-- Feedback: a floating button + modal, reachable from every screen once
+     signed in. Not tied to any one route - a tester can flag something from
+     wherever they were when they noticed it, and the current hash goes along
+     as context automatically. -->
+<button id="feedback-btn" type="button" title="Send feedback" hidden>
+  <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+  Feedback
+</button>
+<div id="feedback-modal" hidden>
+  <div class="modal-scrim" id="feedback-scrim"></div>
+  <div class="modal-box">
+    <h2>Tell us what's up</h2>
+    <p class="muted" style="margin:0 0 14px;">Goes straight to the developer - real feedback from
+      real use is exactly what this test is for.</p>
+    <form id="feedback-form">
+      <label for="feedback-category">What kind of thing is this?</label>
+      <select id="feedback-category">
+        <option value="bug">Something's broken</option>
+        <option value="confusing">Something's confusing</option>
+        <option value="idea">An idea or a request</option>
+        <option value="other">Something else</option>
+      </select>
+      <label for="feedback-message">Tell us more</label>
+      <textarea id="feedback-message" rows="4" placeholder="What happened, and what were you trying to do?"></textarea>
+      <div class="row" style="margin-top:16px;">
+        <button class="btn" type="submit">Send</button>
+        <button class="btn plain" id="feedback-cancel" type="button">Cancel</button>
+        <span class="status" id="feedback-status"></span>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- ============ APP SHELL ============ -->
 <div id="app-shell" hidden>
   <div class="sidebar-scrim" id="sidebar-scrim"></div>
@@ -800,6 +847,13 @@
       <a href="#/account" data-route="account">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9c.2.6.7 1 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
         Account
+      </a>
+      <!-- Shown only once /me reports is_admin - the real boundary is the
+           server's own require_admin (404 to anyone else), this is just
+           about not offering a menu item that would 404. -->
+      <a href="#/admin" data-route="admin" id="nav-admin-link" hidden>
+        <svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.4 8.4-8 9-4.6-.6-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg>
+        Admin
       </a>
     </nav>
   </aside>
@@ -884,7 +938,49 @@
     entry.at = Date.now();
     netlog.push(entry);
     if(netlog.length > 200) netlog.shift();   // bounded: this runs for hours
+    // A genuine failure - a network error, or the server itself faulting -
+    // is worth the developer seeing without anyone having to report it. A
+    // 401 on an expired session or a 404 on a since-deleted opportunity is
+    // the app working correctly and already shown to the person, so only
+    // "no response at all" or a 5xx crosses the line into "the system
+    // noticed its own fault".
+    if(entry.error && (!entry.status || entry.status>=500)){
+      reportIssue(entry.method+" "+entry.path+" failed: "+entry.error,
+                  "status="+(entry.status||0));
+    }
   }
+
+  // ---------------- automatic issue reporting ----------------
+  // Capped per page load rather than per error: a page stuck in a genuine
+  // crash loop can throw hundreds of times a second, and the developer
+  // needs one clear report of that, not a flood that drowns everything else
+  // testers hit in the same window.
+  var issueReportCount = 0;
+  var ISSUE_REPORT_CAP = 20;
+  function reportIssue(message, detail){
+    if(issueReportCount >= ISSUE_REPORT_CAP) return;
+    issueReportCount++;
+    try{
+      fetch("/issues/client", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          message: String(message||"").slice(0,500),
+          detail: String(detail||"").slice(0,4000),
+          route: location.hash,
+        }),
+      }).catch(function(){});   // best-effort - a reporting failure is not itself worth reporting
+    }catch(e){}
+  }
+  window.addEventListener("error", function(e){
+    reportIssue(e.message, (e.error && e.error.stack) || (e.filename+":"+e.lineno));
+  });
+  window.addEventListener("unhandledrejection", function(e){
+    var reason = e.reason;
+    reportIssue(
+      "Unhandled promise rejection: "+(reason && reason.message ? reason.message : reason),
+      (reason && reason.stack) || ""
+    );
+  });
 
   // Exposed for debugging a live session from the console. Deliberately a
   // function rather than the array itself, so it prints a summary rather than
@@ -1131,7 +1227,8 @@
   // ---------------- routing ----------------
   var ROUTES = {dashboard:renderDashboard, review:renderReview, opportunities:renderOpportunities,
                 profile:renderProfile, notifications:renderNotifications, onboarding:renderOnboarding,
-                account:renderAccount, bin:renderBin, opportunity:renderOpportunityDetail};
+                account:renderAccount, bin:renderBin, opportunity:renderOpportunityDetail,
+                admin:renderAdminDashboard};
 
   // Routes may now carry one argument: "#/opportunity/<id>". Everything else
   // keeps its old single-word hash, so no existing link or saved session hash
@@ -2777,6 +2874,162 @@
     });
   }
 
+  // ---------------- admin: beta-test monitoring ----------------
+  // The one screen in this app that is deliberately cross-account - every
+  // other view is scoped to the signed-in profile, this one exists so the
+  // developer can see what real testers are actually hitting while the test
+  // is still running. The server enforces who may see it (require_admin,
+  // 404 to anyone else); this is just where it is drawn.
+  var adminPollTimer = null;
+
+  function stopAdminPolling(){
+    if(adminPollTimer){ clearInterval(adminPollTimer); adminPollTimer=null; }
+  }
+
+  async function renderAdminDashboard(){
+    if(!state.account || !state.account.is_admin){ location.hash="#/dashboard"; return; }
+
+    var overview, users, feedback, issues;
+    try{
+      var loaded = await Promise.all([
+        api("/admin/overview"), api("/admin/users"),
+        api("/admin/feedback?status=new"), api("/admin/issues"),
+      ]);
+      overview=loaded[0]; users=loaded[1]; feedback=loaded[2]; issues=loaded[3];
+    }catch(err){
+      $("#view-root").innerHTML =
+        "<h1 class='view-title'>Admin</h1>"+
+        "<p class='status err'>"+esc(err.message)+"</p>";
+      return;
+    }
+
+    $("#view-root").innerHTML =
+      "<h1 class='view-title'>Admin</h1>"+
+      "<p class='view-sub'>What real testers are doing right now, what they've told you, "+
+      "and what the system has hit on its own.</p>"+
+      adminStats(overview)+
+      "<div class='dash-grid'>"+
+        "<div>"+adminUsersTable(users)+"</div>"+
+        "<div>"+adminFeedbackList(feedback)+adminIssuesList(issues)+"</div>"+
+      "</div>";
+
+    wireAdminActions();
+
+    // Refresh while this screen stays open, so a developer watching a live
+    // test sees new feedback and new issues without reloading the page.
+    // Stopped on route change (below) and never stacks a second timer.
+    stopAdminPolling();
+    adminPollTimer = setInterval(function(){
+      if(currentRoute()!=="admin"){ stopAdminPolling(); return; }
+      renderAdminDashboard();
+    }, 30000);
+  }
+  window.addEventListener("hashchange", function(){
+    if(currentRoute()!=="admin") stopAdminPolling();
+  });
+
+  function adminStats(o){
+    return "<div class='stat-row'>"+
+      statTile("blue","search",o.total_accounts,"Signed-up accounts")+
+      statTile("green","check",o.active_today,"Active in 24h")+
+      statTile("green","check",o.active_7d,"Active in 7 days")+
+      statTile("amber","clock",o.open_feedback,"Open feedback")+
+      statTile("red","shieldOff",o.open_issues,"Open issues")+
+      statTile("purple","send",o.total_submitted,"Applications submitted")+
+    "</div>"+
+    "<p class='muted' style='margin:-10px 0 20px;font-size:.82rem;'>"+
+      o.total_profiles+" profiles &middot; "+o.total_opportunities+" opportunities found &middot; "+
+      o.total_drafted+" drafted &middot; "+o.total_approved+" approved &middot; "+
+      o.total_documents+" documents uploaded"+
+      (o.last_discovery_run ? " &middot; last search run "+esc(timeAgo(o.last_discovery_run)) : "")+
+    "</p>";
+  }
+
+  function adminUsersTable(users){
+    var rows = users.map(function(u){
+      return "<tr>"+
+        "<td>"+esc(u.email)+(u.is_admin?" <span class='pill stage'>admin</span>":"")+"</td>"+
+        "<td>"+esc(u.last_seen_at ? timeAgo(u.last_seen_at) : "never")+"</td>"+
+        "<td>"+u.profile_count+"</td>"+
+        "<td>"+u.opportunity_count+"</td>"+
+        "<td>"+u.submitted_count+"</td>"+
+        "<td>"+u.document_count+"</td>"+
+        "<td>"+u.feedback_count+"</td>"+
+      "</tr>";
+    }).join("");
+    return "<section class='panel'><div class='panel-head'><h2>Who's using it "+
+      "<span class='muted'>("+users.length+")</span></h2></div>"+
+      "<div style='overflow-x:auto;'><table><thead><tr>"+
+      "<th>Account</th><th>Last active</th><th>Profiles</th><th>Opportunities</th>"+
+      "<th>Submitted</th><th>Docs</th><th>Feedback</th></tr></thead>"+
+      "<tbody>"+(rows||"<tr><td colspan='7' class='muted'>Nobody has signed up yet.</td></tr>")+
+      "</tbody></table></div></section>";
+  }
+
+  function adminFeedbackList(items){
+    return "<div class='side-card'><div class='panel-head'><h2>Feedback "+
+      "<span class='muted'>("+items.length+" open)</span></h2></div>"+
+      (items.length ? items.map(function(f){
+        return "<div class='admin-item' data-feedback='"+esc(f.id)+"'>"+
+          "<div class='admin-item-head'><span class='pill stage'>"+esc(f.category)+"</span>"+
+          "<span class='when'>"+esc(timeAgo(f.created_at))+"</span></div>"+
+          "<p>"+esc(f.message)+"</p>"+
+          "<p class='muted' style='font-size:.78rem;margin:4px 0 8px;'>"+esc(f.submitter_email||"")+
+          (f.route?" &middot; "+esc(f.route):"")+"</p>"+
+          "<div class='row'>"+
+          "<button class='btn small plain' data-feedback-status='seen'>Mark seen</button>"+
+          "<button class='btn small' data-feedback-status='resolved'>Resolve</button>"+
+          "</div></div>";
+      }).join("") : "<p class='muted'>Nothing open. Testers haven't flagged anything right now.</p>")+
+      "</div>";
+  }
+
+  function adminIssuesList(items){
+    return "<div class='side-card'><div class='panel-head'><h2>Issues "+
+      "<span class='muted'>("+items.length+" open)</span></h2></div>"+
+      (items.length ? items.map(function(i){
+        return "<div class='admin-item' data-issue='"+esc(i.id)+"'>"+
+          "<div class='admin-item-head'><span class='pill "+(i.source==="server"?"ineligible":"needs_review")+"'>"+
+          esc(i.source)+"</span><span class='when'>"+esc(timeAgo(i.created_at))+"</span></div>"+
+          "<p>"+esc(i.message)+"</p>"+
+          "<p class='muted' style='font-size:.78rem;margin:4px 0;'>"+
+          (i.route?esc(i.route):"")+(i.reporter_email?" &middot; "+esc(i.reporter_email):"")+
+          (i.status_code?" &middot; "+i.status_code:"")+"</p>"+
+          (i.detail ? "<details><summary>Detail</summary><pre class='calltext' style='max-height:200px;'>"+
+            esc(i.detail)+"</pre></details>" : "")+
+          "<div class='row' style='margin-top:8px;'>"+
+          "<button class='btn small' data-issue-resolve='1'>Mark resolved</button>"+
+          "</div></div>";
+      }).join("") : "<p class='muted'>Nothing outstanding - the system hasn't hit a fault it noticed itself.</p>")+
+      "</div>";
+  }
+
+  function wireAdminActions(){
+    $all("[data-feedback-status]").forEach(function(btn){
+      btn.addEventListener("click", async function(){
+        var item = btn.closest("[data-feedback]");
+        var id = item.dataset.feedback;
+        btn.disabled = true;
+        try{
+          await api("/admin/feedback/"+id, {method:"PUT",
+            body:JSON.stringify({status: btn.dataset.feedbackStatus})});
+          item.remove();
+        }catch(err){ showError(err.message); btn.disabled=false; }
+      });
+    });
+    $all("[data-issue-resolve]").forEach(function(btn){
+      btn.addEventListener("click", async function(){
+        var item = btn.closest("[data-issue]");
+        var id = item.dataset.issue;
+        btn.disabled = true;
+        try{
+          await api("/admin/issues/"+id+"/resolve", {method:"POST"});
+          item.remove();
+        }catch(err){ showError(err.message); btn.disabled=false; }
+      });
+    });
+  }
+
   // ---------------- onboarding ----------------
   var onboarding={step:1, chosen:[], createdId:null};
 
@@ -3223,8 +3476,14 @@
   function startPolling(){ schedulePoll(); }
   function stopPolling(){ if(poll.timer){ clearTimeout(poll.timer); poll.timer=null; } }
 
-  function showApp(){ $("#auth-view").hidden=true; $("#app-shell").hidden=false; }
-  function showAuth(){ $("#app-shell").hidden=true; $("#auth-view").hidden=false; }
+  function showApp(){
+    $("#auth-view").hidden=true; $("#app-shell").hidden=false;
+    $("#feedback-btn").hidden=false;
+  }
+  function showAuth(){
+    $("#app-shell").hidden=true; $("#auth-view").hidden=false;
+    $("#feedback-btn").hidden=true;
+  }
 
   async function enterApp(skipRender){
     showApp();
@@ -3265,6 +3524,9 @@
       showBootProblem(err);
       return;
     }
+
+    var adminLink=$("#nav-admin-link");
+    if(adminLink) adminLink.hidden = !state.account.is_admin;
 
     startSession();
     startPolling();
@@ -3477,6 +3739,34 @@
     // extension) must not stop the app itself from working.
     navigator.serviceWorker.register("/assets/sw.js").catch(function(){});
   }
+
+  // ---------------- feedback widget ----------------
+  $("#feedback-btn").addEventListener("click", function(){
+    $("#feedback-status").textContent = "";
+    $("#feedback-message").value = "";
+    $("#feedback-modal").hidden = false;
+    $("#feedback-message").focus();
+  });
+  function closeFeedback(){ $("#feedback-modal").hidden = true; }
+  $("#feedback-cancel").addEventListener("click", closeFeedback);
+  $("#feedback-scrim").addEventListener("click", closeFeedback);
+  $("#feedback-form").addEventListener("submit", async function(e){
+    e.preventDefault();
+    var status = $("#feedback-status");
+    var message = $("#feedback-message").value.trim();
+    if(!message){ status.textContent="Say a little about it first."; status.className="status err"; return; }
+    status.textContent = "Sending…"; status.className = "status";
+    try{
+      await api("/feedback", {method:"POST", body: JSON.stringify({
+        category: $("#feedback-category").value,
+        message: message,
+        route: location.hash,
+      })});
+      status.textContent = "Sent - thank you.";
+      status.className = "status ok";
+      setTimeout(closeFeedback, 900);
+    }catch(err){ status.textContent = err.message; status.className = "status err"; }
+  });
 
   checkAuth();
   loadGoogleConfig();

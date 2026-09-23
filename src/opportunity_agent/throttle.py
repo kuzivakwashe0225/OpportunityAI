@@ -84,6 +84,18 @@ MAIL_SENDER_POLICY = Policy(
     base_lock_seconds=300, max_lock_seconds=3600,
 )
 
+# The client-side issue reporter (POST /issues/client) is deliberately public
+# - a JS error can happen before anyone has signed in, and those are worth
+# seeing too - which makes it the one endpoint here with no account to blame
+# a lockout on. Generous enough that a real page genuinely throwing a burst
+# of errors during a beta test still gets through and shows up in the admin
+# feed; tight enough that it is not a free way to write to this database from
+# outside.
+ISSUE_REPORT_POLICY = Policy(
+    allowance=30, window_seconds=300,
+    base_lock_seconds=60, max_lock_seconds=1800,
+)
+
 # A dict that only ever grows is a slow memory leak wearing a hat. Entries are
 # pruned as they age out; this caps the pathological case where a flood of
 # distinct keys arrives faster than they expire.
@@ -189,8 +201,10 @@ sign_in_by_account = Throttle(ACCOUNT_POLICY)
 sign_in_by_address = Throttle(ADDRESS_POLICY)
 mail_by_recipient = Throttle(MAIL_RECIPIENT_POLICY)
 mail_by_sender = Throttle(MAIL_SENDER_POLICY)
+issue_report_by_address = Throttle(ISSUE_REPORT_POLICY)
 
-_ALL = (sign_in_by_account, sign_in_by_address, mail_by_recipient, mail_by_sender)
+_ALL = (sign_in_by_account, sign_in_by_address, mail_by_recipient, mail_by_sender,
+        issue_report_by_address)
 
 
 def reset_all() -> None:

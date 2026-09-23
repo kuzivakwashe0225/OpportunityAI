@@ -61,6 +61,18 @@ class Account(Base):
     oauth_provider: Mapped[str | None] = mapped_column(String(20), default=None)
     oauth_subject: Mapped[str | None] = mapped_column(String(255), default=None)
     created_at: Mapped[datetime] = mapped_column(default=_now)
+    # Grants access to the /admin/* endpoints - the beta-test monitoring
+    # dashboard (feedback inbox, issue feed, per-user activity). Set from
+    # ADMIN_EMAILS in the environment rather than by hand here (api.py's
+    # _touch_account_activity), the same self-healing-from-config pattern as
+    # GOOGLE_CLIENT_ID and CREDENTIALS_SECRET_KEY: the owner controls who has
+    # it by editing .env, not by someone running a one-off UPDATE against the
+    # live database.
+    is_admin: Mapped[bool] = mapped_column(default=False)
+    # Updated at most once per five minutes (api.py's _touch_account_activity)
+    # - accurate enough to answer "who is actually using this right now"
+    # during a beta test, without a database write on every single request.
+    last_seen_at: Mapped[datetime | None] = mapped_column(default=None)
 
     profiles: Mapped[list["Profile"]] = relationship(
         back_populates="account", cascade="all, delete-orphan"
@@ -279,6 +291,66 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(default=_now)
 
     account: Mapped["Account"] = relationship(back_populates="notifications")
+
+
+class Feedback(Base):
+    """Something a real person, testing the real system, chose to tell us.
+
+    Deliberately separate from IssueReport below even though both end up on
+    the same admin screen: this is voluntary and a person wrote it, so it
+    keeps a status workflow (new -> seen -> resolved) and a place for the
+    developer's own note back - closer to a support ticket than a log line.
+    """
+
+    __tablename__ = "feedback"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+    profile_id: Mapped[str | None] = mapped_column(ForeignKey("profiles.id"), default=None)
+    # What kind of thing this is, in the submitter's own framing - not a
+    # severity, which is the developer's judgement to make after reading it.
+    category: Mapped[str] = mapped_column(String(30), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    # The screen they were on when they wrote it (the SPA's own hash route,
+    # e.g. "#/opportunity/abc123") - the single most useful piece of context
+    # for "what were you looking at", and free: the frontend already knows it.
+    route: Mapped[str | None] = mapped_column(String(200), default=None)
+    status: Mapped[str] = mapped_column(String(20), default="new")
+    admin_note: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    resolved_at: Mapped[datetime | None] = mapped_column(default=None)
+
+
+class IssueReport(Base):
+    """A fault the system noticed on its own - a client-side exception, a
+    failed network request, or a server-side 500 - captured automatically
+    rather than waiting for someone to describe it.
+
+    The whole reason this exists: during a beta test the developer should not
+    have to depend on a tester noticing something broke, correctly describing
+    it, and taking the time to say so. Half the point of "real users, real
+    use cases" is seeing the failures nobody would ever bother to report.
+    """
+
+    __tablename__ = "issue_reports"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    source: Mapped[str] = mapped_column(String(10), nullable=False)  # "client" | "server"
+    # Nullable: a client-side error can happen before anyone has signed in
+    # (the auth screen itself is not exempt from bugs), and a server error is
+    # attributed to whoever's session triggered it, if anyone had.
+    account_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id"), default=None)
+    route: Mapped[str | None] = mapped_column(String(200), default=None)
+    method: Mapped[str | None] = mapped_column(String(10), default=None)
+    status_code: Mapped[int | None] = mapped_column(default=None)
+    message: Mapped[str] = mapped_column(String(1000), nullable=False)
+    # A stack trace or extra context, capped well short of the column limit
+    # by the caller - long enough to actually debug from, short enough that
+    # one very noisy error can't blow out the table.
+    detail: Mapped[str | None] = mapped_column(Text, default=None)
+    user_agent: Mapped[str | None] = mapped_column(String(300), default=None)
+    resolved: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
 
 
 class SearchQueryCache(Base):

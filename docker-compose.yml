@@ -44,6 +44,12 @@ services:
       # keys above. No secret is needed: the browser proves identity with a
       # token this server verifies for itself (google_auth.py).
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      # Who sees /admin/* - the beta-test monitoring dashboard: who's using
+      # this, feedback, and issues the system caught on its own. Comma
+      # separated. An account is promoted the moment it next makes an
+      # authenticated request whose email matches, so this is a live control
+      # - no database edit needed to grant or revoke it.
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
       # Outbound mail for new-account passwords. Unset means registration
       # returns 503 rather than creating accounts whose password was never
       # delivered - see mailer.py. Everything else runs fine without it.
