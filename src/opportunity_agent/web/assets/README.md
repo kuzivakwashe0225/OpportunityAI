@@ -11,6 +11,7 @@ URIs embedded in the HTML.
 | `favicon.png` | The same mark at 48x48 | `<link rel="icon">` |
 | `manifest.json` | PWA manifest | `<link rel="manifest">` |
 | `sw.js` | Service worker - see its own comments for why it's network-first, not cache-first | Registered from the bootstrap script at the bottom of `index.html` |
+| `login-bag.jpg` | Real photo (not a render or illustration) of an open canvas tote with books spilling out onto linen, by photographer fzaytt on Pexels ([photo 30382353](https://www.pexels.com/photo/30382353/)), free under the Pexels License (commercial use permitted, no attribution required). Resized to 800px wide / re-encoded at JPEG q72 (181KB) from the original - the source frame is 1200x2133. Replaces an earlier hand-drawn SVG bag illustration on explicit request for a photographic, not illustrated, image | `.auth-illustration` background in `web/index.html` (login screen and onboarding wizard panels) |
 
 ## Where the icons came from
 
