@@ -311,7 +311,33 @@
   header.appbar{background:var(--surface);color:var(--ink);border-bottom:1px solid var(--line);
     padding:0 24px;display:flex;align-items:center;gap:14px;height:60px;position:sticky;top:0;z-index:20;}
   header.appbar .brand{display:none;} /* brand now lives in the sidebar */
-  header.appbar .spacer{flex:1;}
+  /* The header's own copy of the main nav - same "nav.tabs a" markup the
+     sidebar uses (see the HTML comment above it), styled as a horizontal
+     strip instead of the sidebar's vertical list. flex:1 + min-width:0 is
+     what used to be a bare .spacer - it still does that job, just with
+     visible content in it now, and if it can't fit at the current width it
+     scrolls itself rather than pushing the header wider than the screen -
+     the same "nothing here forces the viewport wide" rule the mobile-zoom
+     fix elsewhere in this file depends on. header.appbar .appbar-tabs
+     (rather than just .appbar-tabs) so this beats nav.tabs a's own
+     specificity without needing !important. */
+  header.appbar .appbar-tabs{flex:1;min-width:56px;display:flex;flex-direction:row;
+    align-items:center;gap:2px;padding:0;overflow-x:auto;overflow-y:hidden;
+    scrollbar-width:none;-ms-overflow-style:none;}
+  header.appbar .appbar-tabs::-webkit-scrollbar{display:none;}
+  header.appbar .appbar-tabs a{flex:none;padding:9px 11px;gap:7px;white-space:nowrap;}
+  header.appbar .appbar-tabs a .label{display:none;}
+  /* Icon-only and scrollable below 560px (a phone in portrait, the width
+     these were actually asked for), icon+label once there's more room, and
+     gone above 920px - past that point the sidebar is permanently visible
+     with the exact same routes spelled out in full, so a second copy in the
+     header would be pure duplication rather than a shortcut. */
+  @media (min-width:560px){ header.appbar .appbar-tabs a .label{display:inline;} }
+  header.appbar .spacer{flex:0;width:0;}
+  @media (min-width:920px){
+    header.appbar .appbar-tabs{display:none;}
+    header.appbar .spacer{flex:1;width:auto;}
+  }
   .sidebar-toggle{display:none;background:none;border:none;color:var(--ink);padding:6px;}
   .sidebar-toggle svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;
     stroke-linecap:round;stroke-linejoin:round;}
@@ -320,6 +346,14 @@
   .switcher{position:relative;}
   .switcher-btn{background:var(--surface-sunk);border:1px solid var(--line);color:var(--ink);
     padding:7px 12px;border-radius:7px;font-size:.85rem;display:flex;align-items:center;gap:8px;}
+  /* A profile's display_name is owner-chosen text with no length limit - the
+     same "an unbounded string can force the header wider than the screen"
+     risk as the emailed-address bug elsewhere in this file, just here
+     instead of in a paragraph. Capped everywhere, not only on the narrow
+     media query below, since a long organisation name can hit this at any
+     width, not just on a phone. */
+  #active-profile-label{max-width:140px;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap;display:inline-block;vertical-align:bottom;}
   .switcher-menu{display:none;position:absolute;right:0;top:42px;background:var(--surface);
     border:1px solid var(--line);border-radius:8px;min-width:250px;box-shadow:var(--lift-3);overflow:hidden;}
   .switcher-menu.open{display:block;}
@@ -358,7 +392,7 @@
     /* The sidebar carries the brand mark, and the sidebar is off-canvas by
        default at this width - without this a phone screen would show no
        name for the app at all until the drawer was opened. */
-    header.appbar .brand{display:flex;align-items:center;font-size:1.05rem;
+    header.appbar .brand{display:flex;align-items:center;gap:7px;font-size:1.05rem;
       font-weight:700;color:var(--ink);}
     main{padding:18px 16px 90px;}
   }
@@ -586,6 +620,34 @@
   #error-banner button{float:right;border:none;background:none;color:var(--bad);font-weight:700;}
 
   @media (max-width:680px){ .grid2{grid-template-columns:1fr;} header.appbar{padding:0 14px;gap:10px;} }
+
+  /* The brand text, the profile switcher and the bell/avatar were already
+     sized for a header with nothing between them but a blank spacer - full
+     profile name, full padding, full gaps. Giving the tab strip a real
+     min-width meant that budget no longer balances on a narrow phone
+     (measured: ~390px wide overflowed by ~18px with a *short* profile name
+     before this rule existed, tabs included or not - this was headroom the
+     header never actually had). Clawing space back from the parts that were
+     never the point of a glance at the header, not from the tabs themselves.
+     Placed last on purpose: header.appbar{padding/gap} is also set by the
+     max-width:680px rule just above, at equal specificity - CSS breaks that
+     tie by source order, not by which @media range is narrower, so this has
+     to come after it (and after the max-width:920px brand rule earlier in
+     this file) to actually win at 390px. */
+  header.appbar .brand-mark{display:none;width:20px;height:20px;flex:none;
+    stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+  @media (max-width:480px){
+    header.appbar{gap:6px;padding:0 10px;}
+    header.appbar .brand{gap:0;}
+    /* Text wordmark trades for just the mark at this width rather than
+       shrinking further - a smaller "OpportunityAI" gets unreadable before
+       it gets narrow enough to matter, the icon alone still reads as the
+       app's logo and the sidebar drawer has the full wordmark one tap away. */
+    header.appbar .brand-text{display:none;}
+    header.appbar .brand-mark{display:block;}
+    .switcher-btn{padding:6px 9px;gap:5px;font-size:.8rem;}
+    #active-profile-label{max-width:64px;}
+  }
 </style>
 </head>
 <body>
@@ -811,7 +873,41 @@
       <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Open menu">
         <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
       </button>
-      <span class="brand">OpportunityAI</span>
+      <span class="brand">
+        <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7l8-4 8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 17l8 4 8-4"/></svg>
+        <span class="brand-text">OpportunityAI</span>
+      </span>
+      <!-- Same routes, same "nav.tabs a" element renderRoute() already
+           queries for its active-state - see the comment there - so this
+           lights up in sync with the sidebar automatically, no extra JS.
+           Trimmed to the five routes used every session; Bin/Account/Admin
+           stay sidebar-and-avatar-only so this never has to scroll past
+           more than a screen's worth on a phone. -->
+      <nav class="tabs appbar-tabs" id="appbar-tabs">
+        <a href="#/dashboard" data-route="dashboard" title="Dashboard">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+          <span class="label">Dashboard</span>
+        </a>
+        <a href="#/review" data-route="review" title="Review queue">
+          <svg viewBox="0 0 24 24"><path d="M21 12V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h6"/><path d="M3 12h5l1.5 3h5L16 12h5"/><path d="M17 17l2 2 4-4"/></svg>
+          <span class="label">Review</span>
+        </a>
+        <a href="#/opportunities" data-route="opportunities" title="All opportunities">
+          <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/></svg>
+          <span class="label">Opportunities</span>
+        </a>
+        <a href="#/notifications" data-route="notifications" title="Notifications">
+          <svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>
+          <span class="label">Notifications</span>
+        </a>
+        <a href="#/profile" data-route="profile" title="Profile &amp; documents">
+          <svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+          <span class="label">Profile</span>
+        </a>
+      </nav>
+      <!-- Only does anything once .appbar-tabs is hidden (>=920px) - see its
+           own comment. At every width where the tabs are visible, this is
+           flex:0/width:0 and the tabs' own flex:1 does the pushing. -->
       <span class="spacer"></span>
       <div class="switcher" id="switcher">
         <button class="switcher-btn" id="switcher-btn" type="button">
